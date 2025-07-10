@@ -1,9 +1,11 @@
+from os import getenv
 from logging import DEBUG, Logger, StreamHandler, FileHandler
 from sys import prefix, base_prefix
 from formatter import ColoredFormatter
 
 LOG_FMT = "[%(asctime)s %(levelname)s] %(name)s: %(message)s"
 LOG_LVL = DEBUG
+TOKEN = getenv("BOT_TOKEN")
 
 
 def logger_init(logger: Logger, filename: str | None = None, stream = None):

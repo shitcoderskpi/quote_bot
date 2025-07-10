@@ -1,15 +1,14 @@
 from logging import getLogger
+from asyncio import run
 
 from config import LOG_LVL, logger_init, env_check
-from redis_controller import RedisController
+from bot import run_bot
 
 def main():
     global logger
     logger.info("Logging setup is done.")
+    run(run_bot())
 
-def redis_check():
-    redis = RedisController()
-    redis.publish("test", {"msg": "Hello world"})
 
 
 if __name__ == "__main__":
