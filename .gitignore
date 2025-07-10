@@ -4,3 +4,6 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 .idea/
+__pycache__/
+venv/
+pyrightconfig.json
