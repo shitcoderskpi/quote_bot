@@ -1,31 +1,28 @@
-from asyncio import run
 from logging import getLogger
-from typing import Any
-from aioredis import from_url
+from typing import Any, Optional
+from redis.asyncio import Redis
+from redis.typing import EncodableT
 
 from config import LOG_LVL, logger_init
 
-# TODO: get rid of aioredis, and find alternative
 class RedisQueue:
-    def __init__(self, redis_url: str, queue_name: str):
-        self.redis_url = redis_url
-        self.queue_name = queue_name
+    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0) -> None:
+        self._redis = Redis(host=host, port=port, db=db)
         self._logger = getLogger(self.__class__.__name__)
         self._logger.setLevel(LOG_LVL)
         logger_init(self._logger)
-        self._pool = run(self._connect(redis_url))
 
-    @staticmethod
-    async def _connect(redis_url: str):
-        return await from_url(redis_url)
+    async def enqueue(self, name: str, data: EncodableT) -> int:
+        self._logger.debug(f"Enqueuing data to queue {name}")
+        return await self._redis.lpush(name, data)
 
-    async def push(self, message: Any):
-        await self._pool.lpush(self.queue_name, message)
+    async def dequeue(self, name: str, timeout: int = 0) -> Optional[Any]:
+        self._logger.debug(f"Dequeuing from queue {name}, timeout={timeout}")
+        if timeout > 0:
+            return await self._redis.brpop(name, timeout=timeout)
+        else:
+            return await self._redis.rpop(name)
 
-    async def pop(self) -> Any:
-        # BRPOP returns tuple (queue_name, message)
-        res = await self._pool.brpop(self.queue_name)
-        return res
+    async def size(self, name: str):
+        return await self._redis.llen(name)
 
-    async def close(self):
-        await self._pool.close()

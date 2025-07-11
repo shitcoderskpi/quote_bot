@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
-from json import dumps
+from json import dumps, loads
 from logging import getLogger
 from re import compile
 from aiogram import F, Bot, Dispatcher, html
@@ -9,9 +9,10 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from asyncio import run
+from base64 import b64decode, b64encode
 
 from config import LOG_LVL, TOKEN, logger_init
-from redis_controller import RedisController
+from redis_controller import RedisQueue
 
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
@@ -22,7 +23,7 @@ if (TOKEN is None):
 
 dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-redis = RedisController()
+redis = RedisQueue()
 
 @dataclass
 class SerializableMessage:
@@ -30,9 +31,16 @@ class SerializableMessage:
     user_status: str | None
     content: str
     image: BytesIO
+    chat_id: int
 
     def to_json(self):
-        return dumps(self, default=lambda obj: obj.__dict__)
+        return dumps({
+            "chat-id": self.chat_id,
+            "username": self.username,
+            "user_status": self.user_status,
+            "content": self.content,
+            "image": b64encode(self.image.read()).decode("utf-8")
+            }, ensure_ascii=False).encode("utf-8")
 
 
 @dp.message(CommandStart())
@@ -65,8 +73,10 @@ async def command_quote_handler(message: Message) -> None:
     else:
         logger.warning(f"User {reply.from_user.id} does not have any photos.")
 
-    msg = SerializableMessage(reply.from_user.full_name, getattr(member, "custom_title", None), reply.text, avatar)
-    redis.publish("generate", msg.to_json())
+    msg = SerializableMessage(reply.from_user.full_name, getattr(member, "custom_title", None), reply.text, avatar, reply.chat.id)
+    key = await redis.enqueue("generate:jobs", msg.to_json())
+    logger.debug(f"Key in redis queue: {key}")
+
 
 async def run_bot() -> None:
     await dp.start_polling(bot)
