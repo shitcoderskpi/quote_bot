@@ -1,0 +1,14 @@
+services:
+  redis:
+    image: redis:7
+  bot:
+    container_name: telegram-bot
+    hostname: telegram-bot
+    build:
+      context: ../services/bot
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - REDIS_HOST=${REDIS_HOST}

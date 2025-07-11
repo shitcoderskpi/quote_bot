@@ -13,6 +13,7 @@ from base64 import b64encode
 
 from config import LOG_LVL, TOKEN, logger_init
 from redis_controller import RedisQueue
+from config import REDIS_HOST
 
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
@@ -23,7 +24,7 @@ if TOKEN is None:
 
 dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-redis = RedisQueue()
+redis = RedisQueue(REDIS_HOST)
 
 @dataclass
 class SerializableMessage:
@@ -85,4 +86,3 @@ async def bot_() -> None:
 if __name__ == "__main__":
     logger.warning("Run bot through main.py.")
     run(bot_())
-

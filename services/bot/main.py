@@ -16,4 +16,3 @@ if __name__ == "__main__":
     logger_init(logger)
     env_check(logger)
     main()
-
