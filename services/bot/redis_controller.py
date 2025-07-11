@@ -25,7 +25,7 @@ class RedisQueue:
         return await self._redis.llen(name)
 
     async def delete(self, name: str):
-        self._logger.debug(f"Deleting from queue {name}")
+        self._logger.debug(f"Deleting queue {name}")
         await self._redis.delete(name)
 
     async def close(self):
