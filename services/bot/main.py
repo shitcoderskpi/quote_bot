@@ -2,13 +2,12 @@ from logging import getLogger
 from asyncio import run
 
 from config import LOG_LVL, logger_init, env_check
-from bot import run_bot
+from bot import bot_
 
 def main():
     global logger
     logger.info("Logging setup is done.")
-    run(run_bot())
-
+    run(bot_())
 
 
 if __name__ == "__main__":

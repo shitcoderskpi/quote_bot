@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
-from json import dumps, loads
+from json import dumps
 from logging import getLogger
 from re import compile
 from aiogram import F, Bot, Dispatcher, html
@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from asyncio import run
-from base64 import b64decode, b64encode
+from base64 import b64encode
 
 from config import LOG_LVL, TOKEN, logger_init
 from redis_controller import RedisQueue
@@ -17,7 +17,7 @@ from redis_controller import RedisQueue
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
 logger_init(logger)
-if (TOKEN is None):
+if TOKEN is None:
     logger.critical("token is not set in environment")
     raise KeyError()
 
@@ -59,7 +59,7 @@ async def get_photos(msg: Message, limit: int = 1):
 async def command_quote_handler(message: Message) -> None:
     reply = message.reply_to_message
 
-    if (reply is None):
+    if reply is None:
         await message.answer("Please specify a message for quote generation")
         return
 
@@ -74,13 +74,15 @@ async def command_quote_handler(message: Message) -> None:
         logger.warning(f"User {reply.from_user.id} does not have any photos.")
 
     msg = SerializableMessage(reply.from_user.full_name, getattr(member, "custom_title", None), reply.text, avatar, reply.chat.id)
-    key = await redis.enqueue("generate:jobs", msg.to_json())
-    logger.debug(f"Key in redis queue: {key}")
+    await redis.enqueue("generate:jobs", msg.to_json())
 
 
-async def run_bot() -> None:
+async def bot_() -> None:
     await dp.start_polling(bot)
+    await redis.close()
 
 
 if __name__ == "__main__":
-    run(run_bot())
+    logger.warning("Run bot through main.py.")
+    run(bot_())
+
