@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Final, Mapping
+from typing import Any, Final, Mapping, Literal
 from logging import Formatter, LogRecord
 from dataclasses import dataclass
 
@@ -29,12 +29,13 @@ class Colors:
 
 
 class ColoredFormatter(Formatter):
-    def __init__(self, fmt: str | None = None, datefmt: str | None = None, style: str = "%", validate: bool = True, *, defaults: Mapping[str, Any] | None = None, colors: Colors = Colors()) -> None:
+    def __init__(self, fmt: str | None = None, datefmt: str | None = None, style: Literal["%", "$", "{"] = "%", validate: bool = True, *, defaults: Mapping[str, Any] | None = None, colors: Colors = Colors()) -> None:
         super().__init__(fmt, datefmt, style, validate, defaults=defaults)
         self.colors = colors
 
-    def color(self, record: str, level) -> str:
+    def _color(self, record: str, level) -> str:
         return self.colors[level] + record + self.colors.reset
 
     def format(self, record: LogRecord) -> str:
-        return self.color(super().format(record), record.levelno)
+        return self._color(super().format(record), record.levelno)
+

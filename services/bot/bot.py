@@ -11,25 +11,20 @@ from aiogram.types import Message
 from asyncio import run
 from base64 import b64encode
 from prometheus_client import Summary
-from config import LOG_LVL, TOKEN, logger_init, REDIS_HOST
+from config import LOG_LVL, TOKEN, logger_init, REDIS_HOST, env_check, LOG_FILE
 from redis_controller import RedisQueue
 
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
-logger_init(logger)
-if TOKEN is None:
-    logger.critical("token is not set in environment")
-    raise KeyError()
+logger_init(logger, LOG_FILE)
 
-if REDIS_HOST is None:
-    logger.critical("redis host is not set in environment")
-    raise KeyError()
+env_check(logger)
 
 dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 redis = RedisQueue(REDIS_HOST)
 
-REQUEST_TIME = Summary("request_processing time", "Time spent processing requests")
+REQUEST_TIME = Summary("request_processing_time", "Time spent processing requests")
 
 @dataclass
 class SerializableMessage:
@@ -49,7 +44,6 @@ class SerializableMessage:
             }, ensure_ascii=False).encode("utf-8")
 
 
-@REQUEST_TIME.time()
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     await message.answer(f"Hello, {html.bold(message.from_user.full_name)}!")
@@ -61,6 +55,9 @@ async def get_member(msg: Message):
 async def get_photos(msg: Message, limit: int = 1):
     logger.debug(f"Getting {msg.from_user.full_name}'s photos ...")
     return await bot.get_user_profile_photos(msg.from_user.id, limit=limit)
+
+def get_member_custom_title(member):
+    return getattr(member, "custom_title", None)
 
 @REQUEST_TIME.time()
 @dp.message(Command(compile("q(oute)?")), F.chat.type.in_({"group", "supergroup"}))
@@ -81,9 +78,8 @@ async def command_quote_handler(message: Message) -> None:
     else:
         logger.warning(f"User {reply.from_user.id} does not have any photos.")
 
-    msg = SerializableMessage(reply.from_user.full_name, getattr(member, "custom_title", None), reply.text, avatar, reply.chat.id)
+    msg = SerializableMessage(reply.from_user.full_name, get_member_custom_title(member), reply.text, avatar, reply.chat.id)
     await redis.enqueue("generate:jobs", msg.to_json())
-
 
 async def bot_() -> None:
     await dp.start_polling(bot)

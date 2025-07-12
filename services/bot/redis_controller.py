@@ -3,14 +3,14 @@ from typing import Any
 from redis.asyncio import Redis
 from redis.typing import EncodableT
 
-from config import LOG_LVL, logger_init
+from config import LOG_LVL, logger_init, LOG_FILE
 
 class RedisQueue:
     def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0) -> None:
         self._redis = Redis(host=host, port=port, db=db)
         self._logger = getLogger(self.__class__.__name__)
         self._logger.setLevel(LOG_LVL)
-        logger_init(self._logger)
+        logger_init(self._logger, LOG_FILE)
         self._closed = False
 
     async def enqueue(self, name: str, data: EncodableT) -> int:
@@ -19,7 +19,7 @@ class RedisQueue:
 
     async def dequeue(self, name: str, timeout: int | float = 0) -> Any | None:
         self._logger.debug(f"Dequeuing from queue {name}, timeout={timeout} s")
-        return await self._redis.brpop(name, timeout=timeout)
+        return await self._redis.brpop([name], timeout=timeout)
 
     async def size(self, name: str):
         return await self._redis.llen(name)
