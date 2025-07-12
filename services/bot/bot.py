@@ -10,10 +10,9 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from asyncio import run
 from base64 import b64encode
-
-from config import LOG_LVL, TOKEN, logger_init
+from prometheus_client import Summary
+from config import LOG_LVL, TOKEN, logger_init, REDIS_HOST
 from redis_controller import RedisQueue
-from config import REDIS_HOST
 
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
@@ -22,9 +21,15 @@ if TOKEN is None:
     logger.critical("token is not set in environment")
     raise KeyError()
 
+if REDIS_HOST is None:
+    logger.critical("redis host is not set in environment")
+    raise KeyError()
+
 dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 redis = RedisQueue(REDIS_HOST)
+
+REQUEST_TIME = Summary("request_processing time", "Time spent processing requests")
 
 @dataclass
 class SerializableMessage:
@@ -44,6 +49,7 @@ class SerializableMessage:
             }, ensure_ascii=False).encode("utf-8")
 
 
+@REQUEST_TIME.time()
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     await message.answer(f"Hello, {html.bold(message.from_user.full_name)}!")
@@ -56,6 +62,7 @@ async def get_photos(msg: Message, limit: int = 1):
     logger.debug(f"Getting {msg.from_user.full_name}'s photos ...")
     return await bot.get_user_profile_photos(msg.from_user.id, limit=limit)
 
+@REQUEST_TIME.time()
 @dp.message(Command(compile("q(oute)?")), F.chat.type.in_({"group", "supergroup"}))
 async def command_quote_handler(message: Message) -> None:
     reply = message.reply_to_message

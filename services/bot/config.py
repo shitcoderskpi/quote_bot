@@ -7,6 +7,8 @@ LOG_FMT = "[%(asctime)s %(levelname)s] %(name)s: %(message)s"
 LOG_LVL = DEBUG
 TOKEN = getenv("BOT_TOKEN")
 REDIS_HOST = getenv("REDIS_HOST")
+PROMETHEUS_PORT = 8000
+PROMETHEUS_ADDR = "0.0.0.0"
 
 
 def logger_init(logger: Logger, filename: str | None = None, stream = None):

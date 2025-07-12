@@ -12,3 +12,5 @@ services:
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - REDIS_HOST=${REDIS_HOST}
+    ports:
+      - "8000:8000"
