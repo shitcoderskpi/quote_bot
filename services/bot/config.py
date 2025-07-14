@@ -4,9 +4,9 @@ from logging import DEBUG, Logger, StreamHandler, FileHandler
 from formatter import ColoredFormatter
 
 LOG_FMT = "[%(asctime)s %(levelname)s] %(name)s: %(message)s"
-LOG_LVL = logging.DEBUG
+LOG_LVL = DEBUG
 LOG_PATH = getenv("LOG_PATH")
-LOG_FILE = f"{LOG_PATH}telegram-bot-service.log"
+LOG_FILE = f"{LOG_PATH}bot-service.log"
 
 TOKEN = getenv("BOT_TOKEN")
 
