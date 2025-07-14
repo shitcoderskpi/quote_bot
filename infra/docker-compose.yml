@@ -19,9 +19,6 @@ services:
       - "8000:8000"
     volumes:
       - ../services/logs:/app/logs
-# For some unknown to me reason gives warning...
-#    volumes:
-#      - ../services/bot:/app
     develop:
       watch:
         - action: sync
@@ -45,4 +42,4 @@ services:
       context: ../services/generator/
       dockerfile: Dockerfile
     environment:
-      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_HOST

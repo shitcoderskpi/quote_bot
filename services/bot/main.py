@@ -7,6 +7,7 @@ from bot import bot_
 
 def main():
     logger = getLogger("main")
+    logger.setLevel(LOG_LVL)
     logger_init(logger, LOG_FILE)
 
     logger.info("Logging setup is done.")

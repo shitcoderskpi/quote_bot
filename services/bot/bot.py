@@ -1,8 +1,7 @@
-import logging
 from dataclasses import dataclass
 from io import BytesIO
 from json import dumps
-from logging import getLogger
+from logging import WARNING, getLogger
 from re import compile
 from aiogram import F, Bot, Dispatcher, html
 from aiogram.client.default import DefaultBotProperties
@@ -20,7 +19,7 @@ logger.setLevel(LOG_LVL)
 # Logs into file
 logger_init(logger, filename=LOG_FILE)
 # Logs into terminal, with filter = level
-logger_init(logger, level=logging.WARNING)
+logger_init(logger, level=WARNING)
 
 env_check(logger)
 
