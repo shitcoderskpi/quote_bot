@@ -31,3 +31,13 @@ services:
 
         - action: restart
           path: ../services/bot/
+  generator:
+    container_name: generator
+    hostname: generator
+    depends_on:
+      - redis
+    build:
+      context: ../services/generator/
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
