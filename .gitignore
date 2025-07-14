@@ -9,4 +9,5 @@ venv/
 pyrightconfig.json
 quote_bot/
 infra/.env
+services/logs
 cmake-build*/

@@ -1,5 +1,6 @@
 services:
   redis:
+    container_name: redis
     image: redis:7
   bot:
     container_name: telegram-bot
@@ -10,10 +11,14 @@ services:
     depends_on:
       - redis
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - REDIS_HOST=${REDIS_HOST}
+      - BOT_TOKEN
+      - REDIS_HOST
+      - LOG_LVL
+      - LOG_PATH
     ports:
       - "8000:8000"
+    volumes:
+      - ../services/logs:/app/logs
 # For some unknown to me reason gives warning...
 #    volumes:
 #      - ../services/bot:/app
