@@ -7,13 +7,16 @@ from bot import bot_
 
 def main():
     logger = getLogger("main")
-    logger.setLevel(LOG_LVL)
     logger_init(logger, LOG_FILE)
 
     logger.info("Logging setup is done.")
     logger.debug(f"Starting Prometheus on 'http://{PROMETHEUS_ADDR}:{PROMETHEUS_PORT}/'")
     start_http_server(PROMETHEUS_PORT, addr=PROMETHEUS_ADDR)
-    run(bot_())
+
+    try:
+        run(bot_())
+    except Exception as e:
+        logger.critical(e)
 
 
 if __name__ == "__main__":

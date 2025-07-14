@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from io import BytesIO
 from json import dumps
@@ -16,7 +17,10 @@ from redis_controller import RedisQueue
 
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
-logger_init(logger, LOG_FILE)
+# Logs into file
+logger_init(logger, filename=LOG_FILE)
+# Logs into terminal, with filter = level
+logger_init(logger, level=logging.WARNING)
 
 env_check(logger)
 

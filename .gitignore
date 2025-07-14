@@ -9,4 +9,4 @@ venv/
 pyrightconfig.json
 quote_bot/
 infra/.env
-.run/
+services/logs
