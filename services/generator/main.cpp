@@ -2,6 +2,8 @@
 #include <spdlog/async.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <hiredis.h>
+#include "prometheus/exposer.h"
+#include "prometheus/registry.h"
 
 #define PATTERN "[%Y-%m-%d %H:%M:%S,%e %l] %n: %v"
 
@@ -16,9 +18,20 @@ std::shared_ptr<spdlog::logger> logger_init(const std::string& name, const spdlo
 
 [[noreturn]] int main()
 {
+    using namespace prometheus;
+    constexpr auto prometheus_host = "0.0.0.0:8080";
     const std::string queue_name = "generate:jobs";
+
     const auto logger = logger_init("main");
     logger->info("Logging setup is done.");
+
+    Exposer exposer {prometheus_host};
+    logger->debug("Exposed prometheus on {}", prometheus_host);
+
+    // metrics registry
+    auto registry = std::make_shared<Registry>();
+
+    exposer.RegisterCollectable(registry);
 
     const auto redis_host = getenv("REDIS_HOST");
     if (redis_host == nullptr) {
@@ -26,6 +39,7 @@ std::shared_ptr<spdlog::logger> logger_init(const std::string& name, const spdlo
         exit(EXIT_FAILURE);
     }
 
+    logger->debug("Connecting to redis host: {}:6379", redis_host);
     // TODO: rewrite to async
     redisContext *c = redisConnect(redis_host, 6379);
     if (c == nullptr || c->err) {

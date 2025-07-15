@@ -2,6 +2,8 @@ services:
   redis:
     container_name: redis
     image: redis:7
+    networks:
+      - monitoring
 
   prometheus:
     image: prom/prometheus
@@ -48,11 +50,15 @@ services:
   generator:
     container_name: generator
     hostname: generator
-    depends_on:
-      - redis
+    networks:
+      - monitoring
     build:
       context: ../services/generator/
       dockerfile: Dockerfile
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
     environment:
       - REDIS_HOST
 

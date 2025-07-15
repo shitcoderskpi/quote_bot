@@ -7,7 +7,9 @@ RUN apk add --no-cache \
     make \
     g++ \
     spdlog-dev \
-    hiredis-dev
+    hiredis-dev \
+    zlib-dev \
+    curl-dev
 
 COPY . .
 
@@ -26,5 +28,7 @@ RUN apk add --no-cache \
     hiredis
 
 COPY --from=builder /app/build/generator .
+
+EXPOSE 8080
 
 ENTRYPOINT ["./generator"]

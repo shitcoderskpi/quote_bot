@@ -5,3 +5,6 @@ scrape_configs:
   - job_name: 'telegram-bot'
     static_configs:
       - targets: ['bot:8000']
+  - job_name: 'generator'
+    static_configs:
+      - targets: ['generator:8080']
