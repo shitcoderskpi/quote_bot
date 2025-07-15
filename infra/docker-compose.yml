@@ -2,9 +2,21 @@ services:
   redis:
     container_name: redis
     image: redis:7
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
   bot:
     container_name: telegram-bot
     hostname: telegram-bot
+    networks:
+      - monitoring
     build:
       context: ../services/bot
       dockerfile: Dockerfile
@@ -43,3 +55,6 @@ services:
       dockerfile: Dockerfile
     environment:
       - REDIS_HOST
+
+networks:
+  monitoring:
