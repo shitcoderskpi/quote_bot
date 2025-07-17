@@ -3,15 +3,20 @@ FROM alpine:latest AS builder
 WORKDIR /app
 
 RUN apk add --no-cache \
+    linux-headers \
     cmake \
     make \
     g++ \
     spdlog-dev \
     hiredis-dev \
     zlib-dev \
-    curl-dev
+    curl-dev \
+    imagemagick-dev
 
 COPY . .
+
+# Patch cppcoro to use ftruncate instead of ftruncate64
+RUN sed -i 's/ftruncate64/ftruncate/g' /app/extern/cppcoro/lib/writable_file.cpp
 
 RUN mkdir build && cd build && \
     cmake -DCMAKE_BUILD_TYPE=Release .. && \
@@ -25,8 +30,10 @@ WORKDIR /app
 RUN apk add --no-cache \
     libstdc++ \
     spdlog \
-    hiredis
-
+    hiredis \
+    librsvg \
+    imagemagick \
+    imagemagick-c++
 COPY --from=builder /app/build/generator .
 
 EXPOSE 8080

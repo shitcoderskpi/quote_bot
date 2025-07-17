@@ -1,15 +1,15 @@
 from dataclasses import dataclass
 from io import BytesIO
 from json import dumps
-from logging import WARNING, getLogger
+from logging import WARNING, getLogger, warning
 from re import compile
 from aiogram import F, Bot, Dispatcher, html
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, FSInputFile, InputFile, Message
 from asyncio import run
-from base64 import b64encode
+from base64 import b64encode, b64decode
 from prometheus_client import Summary
 from config import LOG_LVL, TOKEN, logger_init, REDIS_HOST, env_check, LOG_FILE
 from redis_controller import RedisQueue
@@ -83,6 +83,9 @@ async def command_quote_handler(message: Message) -> None:
 
     msg = SerializableMessage(reply.from_user.full_name, get_member_custom_title(member), reply.text, avatar, reply.chat.id)
     await redis.enqueue("generate:jobs", msg.to_json())
+    img = await redis.dequeue("generate:results")
+    decoded = b64decode(img[1])
+
 
 async def bot_() -> None:
     await dp.start_polling(bot)

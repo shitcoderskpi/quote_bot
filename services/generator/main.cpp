@@ -1,26 +1,66 @@
+
+#include <csignal>
+#include <string>
 #include <spdlog/spdlog.h>
-#include <spdlog/async.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <hiredis.h>
+
+#include "global.h"
+#include "redis_queue.h"
 #include "prometheus/exposer.h"
 #include "prometheus/registry.h"
+#include <Magick++.h>
 
-#define PATTERN "[%Y-%m-%d %H:%M:%S,%e %l] %n: %v"
+#include "cppcoro/sync_wait.hpp"
+#include "extern/prometheus-cpp/util/include/prometheus/detail/base64.h"
 
-std::shared_ptr<spdlog::logger> logger_init(const std::string& name, const spdlog::level::level_enum lvl = spdlog::level::debug) {
-    const auto logger = spdlog::stdout_color_mt(name);
-    logger->set_level(lvl);
-    logger->set_pattern(PATTERN);
-    return logger;
+void sig_handler(const int sig) {
+    switch (sig) {
+        case SIGINT:
+        case SIGTERM:
+            spdlog::info("Received SIGINT/SIGTERN, exiting...");
+            spdlog::drop_all();
+            exit(EXIT_SUCCESS);
+        default:
+            spdlog::info("Received signal {}", sig);
+            return;
+    }
 }
 
+void generate(const std::string& svg, const redis_queue& queue) {
+    try {
+        Magick::Image image;
+        image.read(Magick::Blob(svg.data(), svg.size()));
+        image.density(Magick::Point(300, 300));
+        image.magick("PNG");
+        Magick::Blob blob;
+        image.write(&blob);
+        image.write("output.png");
 
+        const std::string base64 = image_to_base64(blob);
 
-[[noreturn]] int main()
+        spdlog::debug("Enqueuing base64 data to queue");
+        cppcoro::sync_wait(queue.enqueue("generate:results", base64));
+    } catch (const std::exception& e) {
+        spdlog::error("Unhandled exception {}", e.what());
+    }
+}
+
+int main()
 {
     using namespace prometheus;
-    constexpr auto prometheus_host = "0.0.0.0:8080";
+    constexpr auto prometheus_host = "0.0.0.0:1488";
     const std::string queue_name = "generate:jobs";
+
+    std::signal(SIGINT, sig_handler);
+    std::signal(SIGTERM, sig_handler);
+
+    const std::string test_svg = "<svg width='800' height='800' xmlns='http://www.w3.org/2000/svg'>"
+        "  <rect x='80' y='80' width='640' height='640' fill='#f0f'/>"
+        "  <text x='400' y='400' font-size='48' text-anchor='middle' fill='white'>"
+        "    Emoji: 😊🐢🍕"
+        "  </text>"
+        "</svg>";
+
+    spdlog::set_level(spdlog::level::debug);
 
     const auto logger = logger_init("main");
     logger->info("Logging setup is done.");
@@ -38,43 +78,16 @@ std::shared_ptr<spdlog::logger> logger_init(const std::string& name, const spdlo
         logger->critical("REDIS_HOST is not set in the environment.");
         exit(EXIT_FAILURE);
     }
+    Magick::InitializeMagick(nullptr);
 
-    logger->debug("Connecting to redis host: {}:6379", redis_host);
-    // TODO: rewrite to async
-    redisContext *c = redisConnect(redis_host, 6379);
-    if (c == nullptr || c->err) {
-        if (c) {
-            logger->error("Error calling redisConnect(): {}", c->errstr);
-            redisFree(c);
-        } else {
-            logger->error("Unable to allocate redis context");
-        }
-    }
+    cppcoro::static_thread_pool thread_pool(4);
+    const redis_queue queue {redis_host, 6379, thread_pool};
 
     while (true) {
-        auto *reply = static_cast<redisReply *>(redisCommand(c, "BRPOP %s %d", queue_name.c_str(), 0));
-
-        if (reply == nullptr) {
-            logger->error("Command error: {}", c->errstr);
-            freeReplyObject(reply);
-            redisFree(c);
-            exit(1);
-        }
-
-        if (reply->type == REDIS_REPLY_STRING) {
-            logger->debug("Got reply from queue: {}", reply->str);
-        }
-        if (reply->type == REDIS_REPLY_ARRAY) {
-            logger->debug("Got {} elements: ", reply->elements);
-            for (int i = 0; i < reply->elements; ++i) {
-                logger->debug("{}: {}", i, reply->element[i]->str);
-            }
-        }
-        freeReplyObject(reply);
-
+        auto r = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
+        generate(test_svg, queue);
     }
 
     spdlog::drop_all();
-    redisFree(c);
     return EXIT_SUCCESS;
 }

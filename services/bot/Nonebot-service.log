@@ -1,0 +1,10 @@
+[39m[2025-07-17 17:05:32,607 INFO] bot: Starting environment check...[0m
+[39m[2025-07-17 17:05:32,607 INFO] bot: Environment check passed.[0m
+[39m[2025-07-17 17:05:32,613 INFO] main: Logging setup is done.[0m
+[39m[2025-07-17 17:05:32,613 DEBUG] main: Starting Prometheus on 'http://0.0.0.0:8000/'[0m
+[39m[2025-07-17 17:05:46,013 DEBUG] bot: Getting chat member ...[0m
+[39m[2025-07-17 17:05:46,151 DEBUG] bot: Getting SOLID's photos ...[0m
+[39m[2025-07-17 17:05:46,205 DEBUG] bot: Downloading image ...[0m
+[39m[2025-07-17 17:05:46,300 DEBUG] RedisQueue: Enqueuing data to queue generate:jobs[0m
+[39m[2025-07-17 17:05:46,302 DEBUG] RedisQueue: Dequeuing from queue generate:results, timeout=0 s[0m
+[39m[2025-07-17 17:07:09,906 DEBUG] RedisQueue: Closing queue connection[0m
