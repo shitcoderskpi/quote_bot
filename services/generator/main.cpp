@@ -16,24 +16,31 @@ void sig_handler(const int sig) {
     switch (sig) {
         case SIGINT:
         case SIGTERM:
-            spdlog::info("Received SIGINT/SIGTERN, exiting...");
+            spdlog::info("Received SIGINT/SIGTERM, exiting...");
             spdlog::drop_all();
             exit(EXIT_SUCCESS);
         default:
             spdlog::info("Received signal {}", sig);
-            return;
     }
 }
 
-void generate(const std::string& svg, const redis_queue& queue) {
+void generate(const std::string& bg, const std::string &pango, const redis_queue& queue) {
     try {
-        Magick::Image image;
-        image.read(Magick::Blob(svg.data(), svg.size()));
-        image.density(Magick::Point(300, 300));
-        image.magick("PNG");
+        Magick::Image bg_img;
+        Magick::Image pango_img;
+
+        bg_img.read(Magick::Blob(bg.data(), bg.size()));
+        bg_img.density(Magick::Point(300, 300));
+
+        pango_img.read(pango);
+        pango_img.defineSet("pango:markup", "true");
+        pango_img.density(Magick::Point(300, 300));
+        pango_img.textEncoding("UTF-8");
+
+        bg_img.composite(pango_img, MagickCore::GravityType::CenterGravity, Magick::OverCompositeOp);
+        bg_img.magick("PNG");
         Magick::Blob blob;
-        image.write(&blob);
-        image.write("output.png");
+        bg_img.write(&blob);
 
         const std::string base64 = image_to_base64(blob);
 
@@ -55,10 +62,11 @@ int main()
 
     const std::string test_svg = "<svg width='800' height='800' xmlns='http://www.w3.org/2000/svg'>"
         "  <rect x='80' y='80' width='640' height='640' fill='#f0f'/>"
-        "  <text x='400' y='400' font-size='48' text-anchor='middle' fill='white'>"
-        "    Emoji: 😊🐢🍕"
-        "  </text>"
         "</svg>";
+
+    const std::string test_text = "pango:<span font_family='JetBrains Mono Nerd Font, Noto Color Emoji' size='48000'>"
+        "Emoji: 😎🦾✨"
+        "</span>";
 
     spdlog::set_level(spdlog::level::debug);
 
@@ -85,7 +93,7 @@ int main()
 
     while (true) {
         auto r = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
-        generate(test_svg, queue);
+        generate(test_svg, test_text, queue);
     }
 
     spdlog::drop_all();

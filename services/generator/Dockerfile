@@ -32,8 +32,13 @@ RUN apk add --no-cache \
     spdlog \
     hiredis \
     librsvg \
+    cairo \
+    pango \
     imagemagick \
-    imagemagick-c++
+    imagemagick-c++ \
+    font-jetbrains-mono-nerd\
+    font-noto-emoji
+
 COPY --from=builder /app/build/generator .
 
 EXPOSE 8080

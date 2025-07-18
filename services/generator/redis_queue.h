@@ -54,7 +54,9 @@ cppcoro::task<redis_reply> redis_queue::enqueue(const std::string &queue_name, T
     co_await _pool.schedule();
 
     if constexpr (IsString<T>) {
-        redis_reply reply { redisCommand(c, "LPUSH %s %s", queue_name, data.c_str()) };
+        const char* argv[] = { "LPUSH", queue_name.c_str(), data.c_str() };
+        const size_t argvlen[] = { 5, queue_name.size(), data.size() };
+        redis_reply reply { redisCommandArgv(c, 3, argv, argvlen) };
         co_return reply;
     } else if constexpr (HasToString<T>) {
         if constexpr (HasToWString<T>) {
