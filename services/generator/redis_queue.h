@@ -5,7 +5,6 @@
 #ifndef REDIS_QUEUE_H
 #define REDIS_QUEUE_H
 
-#include <async.h>
 #include <spdlog/spdlog.h>
 
 #include "redis_reply.h"

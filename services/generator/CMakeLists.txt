@@ -11,25 +11,34 @@ find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
 add_subdirectory(extern/prometheus-cpp)
+
+enable_testing()
+
+include(FetchContent)
+FetchContent_Declare(
+        googletest
+        URL https://github.com/google/googletest/archive/refs/heads/main.zip
+)
+FetchContent_MakeAvailable(googletest)
+
 add_subdirectory(extern/cppcoro)
 
-
-
-add_executable(${PROJECT_NAME} main.cpp
+# Core (named `kernel` because of prometheus-cpp's core lib conflicting)
+add_library(kernel
         global.h
         redis_queue.cpp
         redis_queue.h
         redis_reply.cpp
         redis_reply.h
+        template_storage.h
+        template_storage.cpp
 )
-
-target_compile_definitions(${PROJECT_NAME} PRIVATE MAGICKCORE_HDRI_ENABLE=1)
-
-target_include_directories(${PROJECT_NAME} PRIVATE ${HIREDIS_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE extern/prometheus-cpp/core/include})
-target_include_directories(${PROJECT_NAME} PRIVATE extern/cppcoro/include)
-target_link_libraries(${PROJECT_NAME} PRIVATE
+target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
+target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
+target_include_directories(kernel PRIVATE ${ImageMagick_INCLUDE_DIRS})
+target_include_directories(kernel PRIVATE extern/prometheus-cpp/core/include})
+target_include_directories(kernel PRIVATE extern/cppcoro/include)
+target_link_libraries(kernel
         spdlog::spdlog
         ${HIREDIS_LINK_LIBRARIES}
         prometheus-cpp::core
@@ -37,4 +46,29 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         cppcoro
         ${ImageMagick_LIBRARIES}
         OpenSSL::Crypto
+)
+
+# Executable
+add_executable(${PROJECT_NAME} main.cpp)
+target_compile_definitions(${PROJECT_NAME} PRIVATE MAGICKCORE_HDRI_ENABLE=1)
+target_include_directories(${PROJECT_NAME} PRIVATE ${HIREDIS_INCLUDE_DIRS})
+target_include_directories(${PROJECT_NAME} PRIVATE ${ImageMagick_INCLUDE_DIRS})
+target_include_directories(${PROJECT_NAME} PRIVATE extern/prometheus-cpp/core/include})
+target_include_directories(${PROJECT_NAME} PRIVATE extern/cppcoro/include)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+        kernel
+)
+
+# Tests (using googletest)
+add_executable(test_project tests/redis_queue_tests.cpp
+        tests/template_storage_tests.cpp
+        tests/base64_tests.cpp)
+target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)
+target_include_directories(test_project PRIVATE ${HIREDIS_INCLUDE_DIRS})
+target_include_directories(test_project PRIVATE ${ImageMagick_INCLUDE_DIRS})
+target_include_directories(test_project PRIVATE extern/prometheus-cpp/core/include})
+target_include_directories(test_project PRIVATE extern/cppcoro/include)
+target_link_libraries(test_project PRIVATE
+        kernel
+        GTest::gtest_main
 )

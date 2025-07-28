@@ -10,7 +10,6 @@
 #include <Magick++.h>
 
 #include "cppcoro/sync_wait.hpp"
-#include "extern/prometheus-cpp/util/include/prometheus/detail/base64.h"
 
 void sig_handler(const int sig) {
     switch (sig) {
