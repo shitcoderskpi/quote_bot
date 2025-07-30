@@ -14,7 +14,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 add_executable(${PROJECT_NAME}
-        redis_queue_tests.cpp)
+        redis_tests.cpp
+        template_storage_tests.cpp
+        globals.h
+        base64_tests.cpp
+)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         GTest::gtest_main

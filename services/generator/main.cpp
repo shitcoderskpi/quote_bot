@@ -1,15 +1,17 @@
-
 #include <csignal>
+#include <exception>
 #include <string>
 #include <spdlog/spdlog.h>
 
-#include "global.h"
+#include "Magick++/Image.h"
+#include "globals.h"
 #include "redis_queue.h"
 #include "prometheus/exposer.h"
 #include "prometheus/registry.h"
 #include <Magick++.h>
 
 #include "cppcoro/sync_wait.hpp"
+#include "template_storage.h"
 
 void sig_handler(const int sig) {
     switch (sig) {
@@ -19,56 +21,39 @@ void sig_handler(const int sig) {
             spdlog::drop_all();
             exit(EXIT_SUCCESS);
         default:
-            spdlog::info("Received signal {}", sig);
+            spdlog::info("Received signal {}, exiting...", strsignal(sig));
+            spdlog::drop_all();
+            exit(EXIT_SUCCESS);
     }
 }
 
-void generate(const std::string& bg, const std::string &pango, const redis_queue& queue) {
+void generate(const std::string& img, const redis_queue& queue) {
     try {
-        Magick::Image bg_img;
-        Magick::Image pango_img;
+        Magick::Image image;
+        image.density(Magick::Point(300, 300));
+        image.read(Magick::Blob(img.data(), img.length()));
+        image.magick("PNG");
 
-        bg_img.read(Magick::Blob(bg.data(), bg.size()));
-        bg_img.density(Magick::Point(300, 300));
-
-        pango_img.read(pango);
-        pango_img.defineSet("pango:markup", "true");
-        pango_img.density(Magick::Point(300, 300));
-        pango_img.textEncoding("UTF-8");
-
-        bg_img.composite(pango_img, MagickCore::GravityType::CenterGravity, Magick::OverCompositeOp);
-        bg_img.magick("PNG");
         Magick::Blob blob;
-        bg_img.write(&blob);
-
-        const std::string base64 = image_to_base64(blob);
-
-        spdlog::debug("Enqueuing base64 data to queue");
-        cppcoro::sync_wait(queue.enqueue("generate:results", base64));
-    } catch (const std::exception& e) {
-        spdlog::error("Unhandled exception {}", e.what());
+        image.write(&blob);
+        
+        spdlog::debug("Enqueuing data to results queue");
+        cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(blob)));
+    } catch (const std::exception &e){
+        spdlog::error("Got exception {}", e.what());
     }
 }
 
 int main()
 {
     using namespace prometheus;
-    constexpr auto prometheus_host = "0.0.0.0:1488";
+    constexpr auto prometheus_host = "0.0.0.0:8080";
     const std::string queue_name = "generate:jobs";
 
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
 
-    const std::string test_svg = "<svg width='800' height='800' xmlns='http://www.w3.org/2000/svg'>"
-        "  <rect x='80' y='80' width='640' height='640' fill='#f0f'/>"
-        "</svg>";
-
-    const std::string test_text = "pango:<span font_family='JetBrains Mono Nerd Font, Noto Color Emoji' size='48000'>"
-        "Emoji: 😎🦾✨"
-        "</span>";
-
     spdlog::set_level(spdlog::level::debug);
-
     const auto logger = logger_init("main");
     logger->info("Logging setup is done.");
 
@@ -87,12 +72,16 @@ int main()
     }
     Magick::InitializeMagick(nullptr);
 
-    cppcoro::static_thread_pool thread_pool(4);
+
+    // TODO: use cli args to set number of threads
+    cppcoro::static_thread_pool thread_pool {4};
     const redis_queue queue {redis_host, 6379, thread_pool};
+    template_storage storage {};
+    cppcoro::sync_wait( storage.load_templates_async("templates/", thread_pool) );
 
     while (true) {
         auto r = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
-        generate(test_svg, test_text, queue);
+        generate(storage["tg_template"], queue);
     }
 
     spdlog::drop_all();

@@ -36,10 +36,12 @@ RUN apk add --no-cache \
     pango \
     imagemagick \
     imagemagick-c++ \
-    font-jetbrains-mono-nerd\
+    font-jetbrains-mono-nerd \
     font-noto-emoji
 
 COPY --from=builder /app/build/generator .
+
+COPY templates/ ./templates/
 
 EXPOSE 8080
 

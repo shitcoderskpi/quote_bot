@@ -10,7 +10,10 @@ find_package(PkgConfig REQUIRED)
 find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
-add_subdirectory(extern/prometheus-cpp)
+
+cmake_policy(SET CMP0002 NEW)
+set(ENABLE_TESTING OFF CACHE BOOL "Disable tests in prometheus-cpp" FORCE)
+add_subdirectory(extern/prometheus-cpp EXCLUDE_FROM_ALL)
 
 enable_testing()
 
@@ -25,7 +28,7 @@ add_subdirectory(extern/cppcoro)
 
 # Core (named `kernel` because of prometheus-cpp's core lib conflicting)
 add_library(kernel
-        global.h
+        globals.h
         redis_queue.cpp
         redis_queue.h
         redis_reply.cpp
@@ -60,7 +63,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # Tests (using googletest)
-add_executable(test_project tests/redis_queue_tests.cpp
+add_executable(test_project tests/redis_tests.cpp
         tests/template_storage_tests.cpp
         tests/base64_tests.cpp)
 target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)

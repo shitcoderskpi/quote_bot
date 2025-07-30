@@ -3,7 +3,7 @@
 //
 
 #include "redis_queue.h"
-#include "global.h"
+#include "globals.h"
 #include "cppcoro/schedule_on.hpp"
 
 redis_queue::redis_queue(const std::string &host, const int port, cppcoro::static_thread_pool& pool) noexcept : _pool {pool} {
@@ -43,11 +43,11 @@ cppcoro::task<redis_reply> redis_queue::dequeue(const std::string &queue_name, c
 cppcoro::task<size_t> redis_queue::size(const std::string &queue_name) const {
     co_await _pool.schedule();
 
-    if (redis_reply reply { redisCommand(c, "LLEN %s", queue_name) }; reply.get_reply().has_value()) {
-        if (reply.get_reply().value()->type == REDIS_REPLY_INTEGER) {
-            co_return reply.get_reply().value()->integer;
+    if (const redis_reply reply { redisCommand(c, "LLEN %s", queue_name) }; reply.has_value()) {
+        if (reply.get_type().value() == REDIS_REPLY_INTEGER) {
+            co_return reply.get_integer().value();
         }
-        spdlog::warn("Redis reply to LLEN was {}", reply.get_reply().value()->type);
+        spdlog::warn("Redis reply to LLEN was {}", reply.get_type().value());
     }
 
     co_return 0;

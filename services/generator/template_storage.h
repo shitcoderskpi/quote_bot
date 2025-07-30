@@ -10,12 +10,9 @@
 #include <unordered_map>
 #include <spdlog/spdlog.h>
 
-#include "global.h"
-// Prevents name conflict
-#undef linux
+#include "globals.h"
 #include "cppcoro/static_thread_pool.hpp"
 #include "cppcoro/task.hpp"
-
 
 class template_storage {
 public:
@@ -31,10 +28,11 @@ public:
         return templates.size();
     }
 
-    // TODO: Add async file read
-    //  It will not come any time soon, cppcoro's file manipulation is broken (ಥ﹏ಥ)
-    // cppcoro::task<> load_template_async(const std::filesystem::path& path, const cppcoro::static_thread_pool& pool);
-    // cppcoro::task<> load_templates_async(const std::filesystem::path& path, const cppcoro::static_thread_pool& pool);
+    // TODO: may try to get rid of all sync file loading function, and move pool reference to class' field (???)
+    // P.S.: this can be good in way to use same aio iterface w/ `redis_queue` as there reference to static_thread_pool
+    //       is passed to constructor
+    cppcoro::task<> load_template_async(const std::filesystem::path& path, cppcoro::static_thread_pool& pool);
+    cppcoro::task<> load_templates_async(const std::filesystem::path& path, cppcoro::static_thread_pool& pool);
 
     std::string operator[] (const std::string& key);
 
