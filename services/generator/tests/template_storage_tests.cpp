@@ -5,11 +5,11 @@
 #include <future>
 #include <gtest/gtest.h>
 
-#include "../template_storage.h"
+#include "../storage.h"
 #include "cppcoro/sync_wait.hpp"
 #include "globals.h"
 
-template_storage storage {};
+templates::storage storage {};
 extern cppcoro::static_thread_pool thread_pool;
 
 constexpr std::string_view template_path = "../templates/tg_template.svg";

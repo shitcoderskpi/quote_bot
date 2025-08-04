@@ -18,10 +18,10 @@
     />
   </g>
 
-  <text x="56" y="23" font-size="14" font-weight="bold" fill="#2a5885">Александр</text>
-  <text x="300" y="23" font-size="12" fill="#888" text-anchor="end">админ</text>
+  <text x="56" y="23" font-size="12pt" font-weight="bold" fill="#2a5885">Александр</text>
+  <text x="300" y="23" font-size="10pt" fill="#888" text-anchor="end">админ</text>
 
-  <text x="56" y="45" font-size="13" fill="#000">
-    Привет! Это пример сообщения
+  <text x="56" y="45" font-size="11pt" fill="#000">
+    Привет! Это пример сообщения 🥳🤩😎
   </text>
 </svg>

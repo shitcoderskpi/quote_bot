@@ -3,7 +3,7 @@
 //
 #include <gtest/gtest.h>
 
-#include "../global.h"
+#include "../globals.h"
 
 ///================================///
 ///          DISCLAIMER:           ///

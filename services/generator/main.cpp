@@ -10,8 +10,10 @@
 #include "prometheus/registry.h"
 #include <Magick++.h>
 
+#include "preprocessor.h"
+#include "renderer.h"
 #include "cppcoro/sync_wait.hpp"
-#include "template_storage.h"
+#include "storage.h"
 
 void sig_handler(const int sig) {
     switch (sig) {
@@ -70,18 +72,30 @@ int main()
         logger->critical("REDIS_HOST is not set in the environment.");
         exit(EXIT_FAILURE);
     }
-    Magick::InitializeMagick(nullptr);
-
 
     // TODO: use cli args to set number of threads
     cppcoro::static_thread_pool thread_pool {4};
-    const redis_queue queue {redis_host, 6379, thread_pool};
-    template_storage storage {};
+    templates::storage storage {};
     cppcoro::sync_wait( storage.load_templates_async("templates/", thread_pool) );
 
+    templates::preprocessor p {};
+
+    auto img = p.preprocess(storage["tg_template"]);
+
+    renderer r {};
+
+    const redis_queue queue {redis_host, 6379, thread_pool};
+
     while (true) {
-        auto r = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
-        generate(storage["tg_template"], queue);
+        auto reply = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
+        auto result = r.render_image(img, Magick::Point {300, 300});
+
+        result.magick("PNG");
+
+        logger->debug("Image dimensions: x={}|y={}", result.columns(), result.rows());
+
+        spdlog::debug("Enqueuing data to results queue");
+        cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(result)));
     }
 
     spdlog::drop_all();

@@ -9,6 +9,7 @@ find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
+find_library(PUGIXML_LIBRARY NAMES pugixml)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
 
 cmake_policy(SET CMP0002 NEW)
@@ -33,14 +34,25 @@ add_library(kernel
         redis_queue.h
         redis_reply.cpp
         redis_reply.h
-        template_storage.h
-        template_storage.cpp
+        storage.h
+        storage.cpp
+        preprocessor.cpp
+        preprocessor.h
+        image.cpp
+        image.h
+        text.cpp
+        text.h
+        text_factory.cpp
+        text_factory.h
+        renderer.cpp
+        renderer.h
 )
 target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
 target_include_directories(kernel PRIVATE ${ImageMagick_INCLUDE_DIRS})
 target_include_directories(kernel PRIVATE extern/prometheus-cpp/core/include})
 target_include_directories(kernel PRIVATE extern/cppcoro/include)
+target_include_directories(kernel PRIVATE ${PUGIXML_INCLUDE_DIR})
 target_link_libraries(kernel
         spdlog::spdlog
         ${HIREDIS_LINK_LIBRARIES}
@@ -49,6 +61,7 @@ target_link_libraries(kernel
         cppcoro
         ${ImageMagick_LIBRARIES}
         OpenSSL::Crypto
+        ${PUGIXML_LIBRARY}
 )
 
 # Executable

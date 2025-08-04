@@ -11,7 +11,8 @@ RUN apk add --no-cache \
     hiredis-dev \
     zlib-dev \
     curl-dev \
-    imagemagick-dev
+    imagemagick-dev \
+    pugixml-dev
 
 COPY . .
 
@@ -37,7 +38,9 @@ RUN apk add --no-cache \
     imagemagick \
     imagemagick-c++ \
     font-jetbrains-mono-nerd \
-    font-noto-emoji
+    font-noto-emoji \
+    pugixml \
+    font-noto
 
 COPY --from=builder /app/build/generator .
 
