@@ -81,7 +81,7 @@ inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, con
         static_cast<double>(bg.rows())
         ));
 
-    return Magick::Point(x_offset, y_offset);
+    return {static_cast<double>(x_offset), static_cast<double>(y_offset)};
 }
 
 inline long renderer::alignment_to_offset(const PangoAlignment &alignment, const long &text_width) {

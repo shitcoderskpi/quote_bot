@@ -20,22 +20,6 @@ namespace schemas {
 
 CAPNP_DECLARE_SCHEMA(c9e14d40019ba921);
 CAPNP_DECLARE_SCHEMA(b72c1368138cc9cb);
-CAPNP_DECLARE_SCHEMA(e400aa8e6ab6d3d1);
-enum class Weight_e400aa8e6ab6d3d1: uint16_t {
-  THIN = 100,
-  ULTRALIGHT = 200,
-  LIGHT = 300,
-  SEMILIGHT = 350,
-  BOOK = 380,
-  NORMAL = 400,
-  MEDIUM = 500,
-  SEMIBOLD = 600,
-  BOLD = 700,
-  ULTRABOLD = 800,
-  HEAVY = 900,
-  ULTRAHEAVY = 1000,
-};
-CAPNP_DECLARE_ENUM(Weight, e400aa8e6ab6d3d1);
 CAPNP_DECLARE_SCHEMA(cda29255ea1e0512);
 enum class Alignment_cda29255ea1e0512: uint16_t {
   LEFT,
@@ -70,8 +54,6 @@ struct Image::TextEntry {
   class Reader;
   class Builder;
   class Pipeline;
-  typedef ::capnp::schemas::Weight_e400aa8e6ab6d3d1 Weight;
-
   typedef ::capnp::schemas::Alignment_cda29255ea1e0512 Alignment;
 
 
@@ -203,7 +185,7 @@ public:
   inline bool hasSize() const;
   inline  ::capnp::Text::Reader getSize() const;
 
-  inline  ::Image::TextEntry::Weight getWeight() const;
+  inline  ::uint16_t getWeight() const;
 
   inline  ::Image::TextEntry::Alignment getAlignment() const;
 
@@ -260,8 +242,8 @@ public:
   inline void adoptSize(::capnp::Orphan< ::capnp::Text>&& value);
   inline ::capnp::Orphan< ::capnp::Text> disownSize();
 
-  inline  ::Image::TextEntry::Weight getWeight();
-  inline void setWeight( ::Image::TextEntry::Weight value);
+  inline  ::uint16_t getWeight();
+  inline void setWeight( ::uint16_t value);
 
   inline  ::Image::TextEntry::Alignment getAlignment();
   inline void setAlignment( ::Image::TextEntry::Alignment value);
@@ -468,17 +450,17 @@ inline ::capnp::Orphan< ::capnp::Text> Image::TextEntry::Builder::disownSize() {
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
-inline  ::Image::TextEntry::Weight Image::TextEntry::Reader::getWeight() const {
-  return _reader.getDataField< ::Image::TextEntry::Weight>(
+inline  ::uint16_t Image::TextEntry::Reader::getWeight() const {
+  return _reader.getDataField< ::uint16_t>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS);
 }
 
-inline  ::Image::TextEntry::Weight Image::TextEntry::Builder::getWeight() {
-  return _builder.getDataField< ::Image::TextEntry::Weight>(
+inline  ::uint16_t Image::TextEntry::Builder::getWeight() {
+  return _builder.getDataField< ::uint16_t>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS);
 }
-inline void Image::TextEntry::Builder::setWeight( ::Image::TextEntry::Weight value) {
-  _builder.setDataField< ::Image::TextEntry::Weight>(
+inline void Image::TextEntry::Builder::setWeight( ::uint16_t value) {
+  _builder.setDataField< ::uint16_t>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
 }
 

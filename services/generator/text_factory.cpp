@@ -24,7 +24,7 @@ namespace pango {
         text.x = reader.getX();
         text.y = reader.getY();
         text.size = reader.getSize();
-        text.weight = capnp_to_pango_weight(reader.getWeight());
+        text.weight = reader.getWeight();
         text.alignment = capnp_to_pango_alignment(reader.getAlignment());
         text.color = reader.getColor();
         text.wrap_width = reader.getWrapWidth();
@@ -50,10 +50,6 @@ namespace pango {
         }
 
         return weight.as_int();
-    }
-
-    weight text_factory::capnp_to_pango_weight(const Image::TextEntry::Weight &w) {
-        return static_cast<weight>(w);
     }
 
     PangoAlignment text_factory::capnp_to_pango_alignment(const Image::TextEntry::Alignment &a) {

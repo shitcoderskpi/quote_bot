@@ -34,8 +34,6 @@ namespace pango {
 
         static unsigned short font_weight_to_pango(const pugi::xml_attribute &weight);
 
-        static weight capnp_to_pango_weight(const Image::TextEntry::Weight &w);
-
         static PangoAlignment capnp_to_pango_alignment(const Image::TextEntry::Alignment &a);
     };
 

@@ -18,9 +18,6 @@ class image_serializer {
     template<typename AlignmentT>
     static AlignmentT _pango_to_capnp_alignment(const PangoAlignment &alignment);
 
-    template<class WeightT>
-    static WeightT _pango_to_capnp_weight(const unsigned short &weight);
-
     static std::vector<pango::text> read_text(const Image::Reader &img_reader);
 
 };
@@ -32,11 +29,6 @@ AlignmentT image_serializer::_pango_to_capnp_alignment(const PangoAlignment &ali
         case PANGO_ALIGN_RIGHT: return Image::TextEntry::Alignment::RIGHT;
         default: return Image::TextEntry::Alignment::LEFT;
     }
-}
-
-template<typename WeightT>
-WeightT image_serializer::_pango_to_capnp_weight(const unsigned short &weight) {
-    return static_cast<WeightT>(weight);
 }
 
 

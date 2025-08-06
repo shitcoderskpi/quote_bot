@@ -23,7 +23,7 @@ void image_serializer::serialize_image(const templates::image &img, const std::f
         builder.setX(x);
         builder.setY(y);
         builder.setSize(size);
-        builder.setWeight(_pango_to_capnp_weight<capnp::schemas::Weight_e400aa8e6ab6d3d1>(weight));
+        builder.setWeight(weight);
         builder.setAlignment(_pango_to_capnp_alignment<capnp::schemas::Alignment_cda29255ea1e0512>(alignment));
         builder.setColor(color);
         builder.setWrapWidth(wrap_width);
@@ -53,9 +53,10 @@ std::vector<pango::text> image_serializer::read_text(const Image::Reader &img_re
     const auto text_reader = img_reader.getTextEntries();
     std::vector<pango::text> result {text_reader.size()};
 
+    size_t i {};
     for (const auto &entry : text_reader) {
         const auto text = pango::text_factory::from_capnp_reader(entry);
-        result.emplace_back(std::move(text));
+        result[i++] = text;
     }
 
     return result;

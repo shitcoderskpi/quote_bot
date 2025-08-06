@@ -79,7 +79,7 @@ int main()
     // TODO: use cli args to set number of threads
     cppcoro::static_thread_pool thread_pool {4};
     templates::storage storage {};
-    cppcoro::sync_wait( storage.load_templates_async("../templates", thread_pool) );
+    cppcoro::sync_wait( storage.load_templates_async("../.cache/templates", thread_pool) );
 
     renderer r {};
 
