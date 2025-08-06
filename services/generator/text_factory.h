@@ -7,6 +7,7 @@
 #include <pugixml.hpp>
 #include <unordered_map>
 
+#include "image.capnp.h"
 #include "text.h"
 
 namespace pango {
@@ -15,10 +16,12 @@ namespace pango {
     public:
         static text from_node(const pugi::xml_node& node);
 
+        static text from_capnp_reader(const Image::TextEntry::Reader& reader);
+
     private:
-        static inline const std::unordered_map<std::string, alignment> alignment_map{
-                            {"middle", center},
-                            {"end", right}
+        static inline const std::unordered_map<std::string, PangoAlignment> alignment_map{
+                            {"middle", PANGO_ALIGN_CENTER},
+                            {"end", PANGO_ALIGN_RIGHT}
         };
         static inline const std::unordered_map<std::string, unsigned short> weight_map{
                     {"lighter", ultralight},
@@ -27,9 +30,13 @@ namespace pango {
                     {"bolder", ultrabold}
         };
 
-        static alignment anchor_to_alignment(const std::string &anchor);
+        static PangoAlignment anchor_to_alignment(const std::string &anchor);
 
         static unsigned short font_weight_to_pango(const pugi::xml_attribute &weight);
+
+        static weight capnp_to_pango_weight(const Image::TextEntry::Weight &w);
+
+        static PangoAlignment capnp_to_pango_alignment(const Image::TextEntry::Alignment &a);
     };
 
 } // pango

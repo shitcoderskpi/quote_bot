@@ -15,18 +15,21 @@
 #include "cppcoro/sync_wait.hpp"
 #include "storage.h"
 
+volatile sig_atomic_t shutdown = 0;
+
 void sig_handler(const int sig) {
     switch (sig) {
         case SIGINT:
         case SIGTERM:
             spdlog::info("Received SIGINT/SIGTERM, exiting...");
             spdlog::drop_all();
-            exit(EXIT_SUCCESS);
+            break;
         default:
             spdlog::info("Received signal {}, exiting...", strsignal(sig));
             spdlog::drop_all();
-            exit(EXIT_SUCCESS);
+            break;
     }
+    shutdown = 1;
 }
 
 void generate(const std::string& img, const redis_queue& queue) {
@@ -38,7 +41,7 @@ void generate(const std::string& img, const redis_queue& queue) {
 
         Magick::Blob blob;
         image.write(&blob);
-        
+
         spdlog::debug("Enqueuing data to results queue");
         cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(blob)));
     } catch (const std::exception &e){
@@ -76,28 +79,26 @@ int main()
     // TODO: use cli args to set number of threads
     cppcoro::static_thread_pool thread_pool {4};
     templates::storage storage {};
-    cppcoro::sync_wait( storage.load_templates_async("templates/", thread_pool) );
-
-    templates::preprocessor p {};
-
-    auto img = p.preprocess(storage["tg_template"]);
+    cppcoro::sync_wait( storage.load_templates_async("../templates", thread_pool) );
 
     renderer r {};
 
     const redis_queue queue {redis_host, 6379, thread_pool};
 
-    while (true) {
+    while (!shutdown) {
         auto reply = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
-        auto result = r.render_image(img, Magick::Point {300, 300});
+        auto result = r.render_image(storage["tg_template"], Magick::Point {300, 300});
 
         result.magick("PNG");
 
         logger->debug("Image dimensions: x={}|y={}", result.columns(), result.rows());
 
-        spdlog::debug("Enqueuing data to results queue");
+        logger->debug("Enqueuing data to results queue");
+        result.write("output.png");
         cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(result)));
     }
 
+    storage.save_all("../.cache/templates/");
     spdlog::drop_all();
     return EXIT_SUCCESS;
 }

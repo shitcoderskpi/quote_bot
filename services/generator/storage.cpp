@@ -7,6 +7,9 @@
 #include <sstream>
 
 #include "storage.h"
+
+#include "image_serializer.h"
+
 namespace templates {
     void storage::load_template(const std::filesystem::path &path) {
         if (!std::filesystem::exists(path) || !std::filesystem::is_regular_file(path)) {
@@ -27,7 +30,8 @@ namespace templates {
         file.read(buffer, length);
 
         const auto template_name = path.stem().string();
-        templates.emplace(template_name, std::string {buffer});
+        const auto img = _preprocessor.preprocess(buffer);
+        templates.emplace(template_name, img);
         logger->info("Template {} is loaded successfully", template_name);
 
         delete[] buffer;
@@ -52,21 +56,39 @@ namespace templates {
             co_return;
         }
 
-        co_await pool.schedule();
-        std::lock_guard lock {mtx};
-
-        std::ifstream file {path};
-        if (!file) {
-            logger->error("Failed to open a file {}", path.filename().string());
+        const auto template_name = path.stem().string();
+        if (templates.contains(template_name)) {
+            logger->warn("Template {} is already loaded", template_name);
             co_return;
         }
 
-        std::stringstream ss;
-        ss << file.rdbuf();
+        co_await pool.schedule();
+        std::lock_guard lock {mtx};
 
-        const auto template_name = path.stem().string();
-        templates.emplace(template_name, ss.str());
-        logger->info("Template {} is loaded successfully", template_name);
+        if (!path.has_extension() || path.extension() != ".csvg") {
+            std::ifstream file {path};
+            if (!file) {
+                logger->error("Failed to open a file {}", path.filename().string());
+                co_return;
+            }
+
+            std::stringstream ss;
+            ss << file.rdbuf();
+
+            const auto img = _preprocessor.preprocess(ss.str());
+
+            templates.emplace(template_name, img);
+            logger->info("Template {} is loaded successfully", template_name);
+        } else {
+            const auto result = image_serializer::deserialize_image(path);
+            if (!result.has_value()) {
+                logger->error("Failed to deserialize image");
+                co_return;
+            }
+
+            templates.emplace(template_name, result.value());
+            logger->info("Template {} is loaded successfully", template_name);
+        }
 
         co_return;
     }
@@ -81,14 +103,24 @@ namespace templates {
         co_await pool.schedule();
 
         for (const auto &entry: std::filesystem::directory_iterator(path)){
+            logger->debug("Loading template file {}", entry.path().string());
             co_await load_template_async(entry, pool);
         }
 
         co_return;
     }
 
-    std::string storage::operator[](const std::string &key) {
+    image storage::operator[](const std::string &key) {
         std::lock_guard lock {mtx};
         return templates.at(key);
+    }
+
+    void storage::save_all(const std::filesystem::path &cache_path) {
+        logger->debug("Saving templates to {}", cache_path.string());
+        for (const auto &[key, img] : templates) {
+            const auto filename = cache_path / (key + extension);
+            if (std::filesystem::exists(filename)) continue;
+            image_serializer::serialize_image(img, filename);
+        }
     }
 }

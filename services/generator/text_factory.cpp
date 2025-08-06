@@ -11,16 +11,30 @@ namespace pango {
         text.y = node.attribute("y").as_int();
         text.size = node.attribute("font-size").as_string();
         text.weight = font_weight_to_pango(node.attribute("font-weight"));
-        text.alignment_ = anchor_to_alignment(node.attribute("text-anchor").as_string());
+        text.alignment = anchor_to_alignment(node.attribute("text-anchor").as_string());
         text.color = node.attribute("fill").as_string();
         text.content = node.child_value();
 
         return text;
     }
 
-    alignment text_factory::anchor_to_alignment(const std::string &anchor) {
+    text text_factory::from_capnp_reader(const Image::TextEntry::Reader &reader) {
+        text text;
+        text.content = reader.getContent();
+        text.x = reader.getX();
+        text.y = reader.getY();
+        text.size = reader.getSize();
+        text.weight = capnp_to_pango_weight(reader.getWeight());
+        text.alignment = capnp_to_pango_alignment(reader.getAlignment());
+        text.color = reader.getColor();
+        text.wrap_width = reader.getWrapWidth();
+
+        return text;
+    }
+
+    PangoAlignment text_factory::anchor_to_alignment(const std::string &anchor) {
         if (!alignment_map.contains(anchor)) {
-            return left;
+            return PANGO_ALIGN_LEFT;
         }
 
         return alignment_map.at(anchor);
@@ -36,5 +50,18 @@ namespace pango {
         }
 
         return weight.as_int();
+    }
+
+    weight text_factory::capnp_to_pango_weight(const Image::TextEntry::Weight &w) {
+        return static_cast<weight>(w);
+    }
+
+    PangoAlignment text_factory::capnp_to_pango_alignment(const Image::TextEntry::Alignment &a) {
+        switch (a) {
+            case Image::TextEntry::Alignment::LEFT: return PANGO_ALIGN_LEFT;
+            case Image::TextEntry::Alignment::CENTER: return PANGO_ALIGN_CENTER;
+            case Image::TextEntry::Alignment::RIGHT: return PANGO_ALIGN_RIGHT;
+            default: return PANGO_ALIGN_LEFT;
+        }
     }
 } // pango

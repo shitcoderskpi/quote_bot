@@ -4,5 +4,11 @@
 
 #include "image.h"
 
+#include <fstream>
+
+#include "image.capnp.h"
+
+#include <capnp/serialize.h>
+
 namespace templates {
 } // templates

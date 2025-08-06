@@ -43,7 +43,7 @@ namespace templates {
             auto const text = pango::text_factory::from_node(node);
 
             node.parent().remove_child(node);
-            text_entries.emplace_back(std::move(text));
+            text_entries.emplace_back(text);
         }
 
         std::stringstream ss;

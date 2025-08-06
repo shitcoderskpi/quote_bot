@@ -6,6 +6,7 @@
 #define TEXT_H
 #include <sstream>
 #include <string>
+#include <pango/pango.h>
 
 namespace pango {
 
@@ -25,13 +26,6 @@ namespace pango {
         ultraheavy = 1000,
     };
 
-    // See: https://docs.gtk.org/Pango/enum.Alignment.html
-    enum alignment : unsigned short {
-        left,
-        center,
-        right,
-    };
-
     // See: https://docs.gtk.org/Pango/pango_markup.html
     struct text {
         std::string content;
@@ -40,7 +34,7 @@ namespace pango {
         // Font attributes
         std::string size;
         unsigned short weight;
-        alignment alignment_;
+        PangoAlignment alignment;
         std::string color;
         int wrap_width = 0;
     };
@@ -48,12 +42,12 @@ namespace pango {
     inline std::string to_string(const text& t) {
         std::stringstream ss;
 
-        ss << "pango:<span font_desc=\"" << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
+        ss << "<span font_desc=\"" << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
         return ss.str();
     }
 
     inline std::ostream& operator<<(std::ostream& os, const text& t) {
-        os << "pango:<span font_desc=\"" << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
+        os << "<span font_desc=\"" << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
         return os;
     }
 

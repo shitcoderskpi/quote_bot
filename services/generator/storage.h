@@ -11,19 +11,23 @@
 #include <spdlog/spdlog.h>
 
 #include "globals.h"
+#include "image.h"
+#include "image_serializer.h"
+#include "preprocessor.h"
 #include "cppcoro/static_thread_pool.hpp"
 #include "cppcoro/task.hpp"
 
 namespace templates {
     class storage {
     public:
-
         storage() noexcept {
             logger = logger_init("template_storage");
         }
-        ~storage() = default;
+        ~storage() noexcept = default;
 
+        [[deprecated("Use async methods instead")]]
         void load_template(const std::filesystem::path& path);
+        [[deprecated("Use async methods instead")]]
         void load_templates(const std::filesystem::path& path);
         size_t size() const noexcept {
             return templates.size();
@@ -35,10 +39,14 @@ namespace templates {
         cppcoro::task<> load_template_async(const std::filesystem::path& path, cppcoro::static_thread_pool& pool);
         cppcoro::task<> load_templates_async(const std::filesystem::path& path, cppcoro::static_thread_pool& pool);
 
-        std::string operator[] (const std::string& key);
+        image operator[] (const std::string& key);
+
+        void save_all(const std::filesystem::path& cache_path);
 
     private:
-        std::unordered_map<std::string, std::string> templates;
+        static const inline std::string extension = ".csvg";
+        const preprocessor _preprocessor {};
+        std::unordered_map<std::string, image> templates;
         std::mutex mtx;
         std::shared_ptr<spdlog::logger> logger;
     };
