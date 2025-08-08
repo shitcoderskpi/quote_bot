@@ -87,7 +87,7 @@ async def command_quote_handler(message: Message) -> None:
 
     decoded = b64decode(img[1])
 
-    await bot.send_photo(reply.chat.id, BufferedInputFile(decoded, "quote.png"), caption="Pretty cool, eh?")
+    await bot.send_sticker(reply.chat.id, BufferedInputFile(decoded, "quote.webp"))
 
 
 async def bot_() -> None:

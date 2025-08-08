@@ -11,11 +11,14 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
+#include <immintrin.h>
+#include <execution>
 
-constexpr std::string trim(std::string_view sv, const std::string_view &what = " \t\n\r") {
-    sv.remove_prefix(std::min(sv.find_first_not_of(what), sv.size()));
-    sv.remove_suffix(sv.size() - std::min(sv.find_last_not_of(what) + 1, sv.size()));
-    return std::string(sv);
+constexpr std::string trim(const std::string_view &sv, const std::string_view &what = " \t\n\r") noexcept {
+    const auto begin = sv.find_first_not_of(what);
+    if (begin == std::string_view::npos) return {};
+    const auto end = sv.find_last_not_of(what);
+    return std::string(sv.substr(begin, end - begin + 1));
 }
 
 constexpr std::string trim(const char* s, const std::string_view& what = " \t\n\r") {
@@ -28,7 +31,9 @@ constexpr std::string trim(const std::string& s, const std::string_view &what = 
 
 inline std::shared_ptr<spdlog::logger> logger_init(const std::string &name,
                                                    const spdlog::level::level_enum lvl = spdlog::level::debug,
-                                                   const std::string &pattern = "[%Y-%m-%d %H:%M:%S.%e %^%l%$] %n: %v") {
+                                                   const std::string &pattern = "[%Y-%m-%d %H:%M:%S.%e %^%l%$] %n: %v"){
+    if (spdlog::get(name) != nullptr) return spdlog::get(name);
+
     const auto logger = spdlog::stdout_color_mt(name);
     logger->set_level(lvl);
     logger->set_pattern(pattern);

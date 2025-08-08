@@ -4,6 +4,9 @@ project(generator)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -mavx2 -O3 -march=native")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS} -Og -g -Wall")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g3 -fno-inline -fno-omit-frame-pointer -fno-strict-aliasing -Wall -Wextra")
 
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -80,6 +83,7 @@ add_library(kernel
 target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
 target_include_directories(kernel PRIVATE ${ImageMagick_INCLUDE_DIRS})
+target_compile_definitions(kernel PRIVATE $<$<CONFIG:Debug>:DEBUG>)
 target_include_directories(kernel PRIVATE extern/prometheus-cpp/core/include})
 target_include_directories(kernel PRIVATE extern/cppcoro/include)
 target_include_directories(kernel PRIVATE ${PUGIXML_INCLUDE_DIR})
@@ -105,7 +109,6 @@ target_link_libraries(kernel
         CapnProto::kj
 )
 
-target_compile_definitions(kernel PRIVATE $<$<CONFIG:Debug>:DEBUG>)
 add_definitions(
         ${CAIRO_CFLAGS_OTHER}
         ${PANGO_CFLAGS_OTHER}
@@ -135,8 +138,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Tests (using googletest)
 add_executable(test_project tests/redis_tests.cpp
         tests/template_storage_tests.cpp
-        tests/base64_tests.cpp
-        tests/img_serializer_tests.cpp)
+        tests/preproccessor_tests.cpp)
 
 target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(test_project PRIVATE ${HIREDIS_INCLUDE_DIRS})

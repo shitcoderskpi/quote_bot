@@ -1,16 +1,13 @@
 #include <csignal>
-#include <exception>
 #include <string>
 #include <spdlog/spdlog.h>
 
 #include "Magick++/Image.h"
-#include "globals.h"
 #include "redis_queue.h"
 #include "prometheus/exposer.h"
 #include "prometheus/registry.h"
 #include <Magick++.h>
 
-#include "preprocessor.h"
 #include "renderer.h"
 #include "cppcoro/sync_wait.hpp"
 #include "storage.h"
@@ -75,12 +72,6 @@ int main()
     using namespace prometheus;
     constexpr auto prometheus_host = "0.0.0.0:8080";
     const std::string queue_name = "generate:jobs";
-    constexpr std::string_view templates_path = "../templates";
-    constexpr std::string_view cache_path = "../.cache/templates";
-
-    if (!std::filesystem::exists(cache_path)) {
-        std::filesystem::create_directories(cache_path);
-    }
 
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
@@ -89,20 +80,22 @@ int main()
     const auto logger = logger_init("main");
     logger->info("Logging setup is done.");
 
-    // FIXME:
-    ////////////////////////////////////////////////////////////////////
-    ///////// THERE IS SOME WIERD ISSUE WITH `civetweb` WORKER /////////
-    /////////                 IT SEGFAULTS                     /////////
-    /////////            ONLY IN DOCKER CONTAINER              /////////
-    /////////     BACKTRACE IN `infra/core/backtrace.txt`      /////////
-    ////////////////////////////////////////////////////////////////////
-    // Exposer exposer {prometheus_host};
-    // logger->debug("Exposed prometheus on {}", prometheus_host);
-    //
-    // // metrics registry
-    // auto registry = std::make_shared<Registry>();
-    //
-    // exposer.RegisterCollectable(registry);
+    //================================================================//
+    //                             FIXME:                             //
+    //----------------------------------------------------------------//
+    //        THERE IS SOME WIERD ISSUE WITH `civetweb` WORKER        //
+    //                        IT SEGFAULTS                            //
+    //                   ONLY IN DOCKER CONTAINER                     //
+    //            BACKTRACE IN `infra/core/backtrace.txt`             //
+    //----------------------------------------------------------------//
+    // Exposer exposer {prometheus_host};                             //
+    // logger->debug("Exposed prometheus on {}", prometheus_host);    //
+    //                                                                //
+    // // metrics registry                                            //
+    // auto registry = std::make_shared<Registry>();                  //
+    //                                                                //
+    // exposer.RegisterCollectable(registry);                         //
+    //================================================================//
 
     const auto redis_host = getenv("REDIS_HOST");
     if (redis_host == nullptr) {
@@ -112,35 +105,49 @@ int main()
 
     // TODO: use cli args to set number of threads
     cppcoro::static_thread_pool thread_pool {4};
-    templates::storage storage {};
-    if (get_count_of_files_in_directory(cache_path) > 0) {
-        cppcoro::sync_wait( storage.load_templates_async(cache_path, thread_pool) );
-    } else {
-        cppcoro::sync_wait( storage.load_templates_async(templates_path, thread_pool) );
-    }
 
-    renderer r {};
+    const renderer r {};
     const redis_queue queue {redis_host, 6379, thread_pool};
     logger->info("Redis started at {}:{}", redis_host, 6379);
 
+    const auto preprocessor = templates::preprocessor {};
     while (!shutdown) {
-        auto reply = cppcoro::sync_wait(queue.dequeue(queue_name, 0));
-        auto result = r.render_image(storage["tg_template"], Magick::Point {300, 300});
+        //==================================================================//
+        //!!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT NOTE !!!!!!!!!!!!!!!!!!!!!!!!!//
+        //------------------------------------------------------------------//
+        // >>> Now assuming that reply looks like this:                     //
+        //      "queue_name", "svg data";                                   //
+        //------------------------------------------------------------------//
+        // >>> Some time after when I'll implement json reader:             //
+        //      "queue_name", "{                                            //
+        //              "id": id,                                           //
+        //              "template": "svg data"                              //
+        //      }"                                                          //
+        //------------------------------------------------------------------//
+        // >>> Even more time after when I'll implement zstd compression:   //
+        //      "queue_name", "zstd compressed data (json)"                 //
+        //==================================================================//
 
-        result.quantizeColorSpace(Magick::ColorspaceType::DisplayP3Colorspace);
-        result.depth(8);
-        result.quantize(true);
-        result.magick("PNG32");
+        if (auto reply = cppcoro::sync_wait(queue.dequeue(queue_name, 0)); reply.has_value()) {
+            const auto img = preprocessor.preprocess(reply.get_array().value()[1].get_str().value(), "sans-serif");
+            auto result = r.render_image(img, Magick::Point {300, 300});
 
-        logger->debug("Image dimensions: x={}|y={}", result.columns(), result.rows());
-        logger->debug("Using {} bits per channel, color space: {}, alpha channel: {}", result.depth(), colorspace_type_to_string(result.colorSpace()), result.alpha());
+            result.quantizeColorSpace(Magick::ColorspaceType::DisplayP3Colorspace);
+            result.depth(8);
+            result.alpha(true);
 
-        logger->debug("Enqueuing data to results queue");
-        result.write("output.png");
-        cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(result)));
+            result.magick("WEBP");
+
+            logger->debug("Image dimensions: x={}|y={}", result.columns(), result.rows());
+            logger->debug("Using {} bits per channel, color space: {}, alpha channel: {}", result.depth(), colorspace_type_to_string(result.colorSpace()), result.alpha());
+
+            logger->debug("Enqueuing data to results queue");
+            cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(result)));
+        } else {
+            logger->error("Bad data was received");
+        }
     }
 
-    storage.save_all(cache_path);
     spdlog::drop_all();
     return EXIT_SUCCESS;
 }

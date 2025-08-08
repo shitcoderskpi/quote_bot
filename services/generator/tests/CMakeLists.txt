@@ -17,7 +17,7 @@ add_executable(${PROJECT_NAME}
         redis_tests.cpp
         template_storage_tests.cpp
         globals.h
-        base64_tests.cpp
+        preproccessor_tests.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
