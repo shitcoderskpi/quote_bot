@@ -32,22 +32,29 @@ namespace pango {
         int x;
         int y;
         // Font attributes
+        std::string font_family;
         std::string size;
         unsigned short weight;
         PangoAlignment alignment;
         std::string color;
         int wrap_width = 0;
+
+        [[nodiscard]] std::string font_description() const {
+            std::stringstream ss;
+            ss << font_family << " " << size;
+            return ss.str();
+        }
     };
 
     inline std::string to_string(const text& t) {
         std::stringstream ss;
 
-        ss << "<span font_desc=\"" << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
+        ss << "<span font_desc=\"" << t.font_family << " " << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
         return ss.str();
     }
 
     inline std::ostream& operator<<(std::ostream& os, const text& t) {
-        os << "<span font_desc=\"" << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
+        os << "<span font_desc=\"" << t.font_family << " " << t.size << "\" font_weight=\"" << t.weight << "\" color=\"" << t.color << "\">" << t.content << "</span>";
         return os;
     }
 

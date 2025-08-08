@@ -19,7 +19,7 @@ namespace templates {
         preprocessor() noexcept;
         ~preprocessor() noexcept = default;
 
-        [[nodiscard]] image preprocess(const std::string &input) const;
+        [[nodiscard]] image preprocess(const std::string &input, const std::string &fallback_font) const;
 
         private:
         std::shared_ptr<spdlog::logger> logger;
@@ -28,11 +28,17 @@ namespace templates {
 
     inline preprocessor::preprocessor() noexcept : logger(logger_init("preprocessor")) {}
 
-    inline image preprocessor::preprocess(const std::string &input) const {
+    inline image preprocessor::preprocess(const std::string &input, const std::string &fallback_font) const {
         pugi::xml_document doc;
         if (const pugi::xml_parse_result result = doc.load_string(input.c_str()); !result) {
             logger->error("Failed to parse XML document: {}", result.description());
             return {input, {}};
+        }
+
+        std::string default_font = fallback_font;
+
+        if (pugi::xml_node svg_node = doc.select_node("//svg:svg").node(); trim(svg_node.attribute("font-family").as_string()) != "") {
+            default_font = trim(svg_node.attribute("font-size").as_string());
         }
 
         std::vector<pango::text> text_entries;
@@ -40,7 +46,7 @@ namespace templates {
         for (const auto xpath_nodes = doc.select_nodes("//*[local-name()='text']"); const pugi::xpath_node& entry: xpath_nodes) {
             const pugi::xml_node& node {entry.node()};
 
-            auto const text = pango::text_factory::from_node(node);
+            auto const text = pango::text_factory::from_node(node, default_font);
 
             node.parent().remove_child(node);
             text_entries.emplace_back(text);

@@ -105,10 +105,12 @@ target_link_libraries(kernel
         CapnProto::kj
 )
 
+target_compile_definitions(kernel PRIVATE $<$<CONFIG:Debug>:DEBUG>)
 add_definitions(
         ${CAIRO_CFLAGS_OTHER}
         ${PANGO_CFLAGS_OTHER}
         ${PANGOCAIRO_CFLAGS_OTHER}
+        -DMAGICKCORE_QUANTUM_DEPTH=16
 )
 
 # Executable
@@ -124,6 +126,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
         ${PANGOCAIRO_INCLUDE_DIRS}
 )
 link_directories(${PANGO_LIBRARY_DIRS})
+
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
         kernel
 )

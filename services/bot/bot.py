@@ -83,12 +83,10 @@ async def command_quote_handler(message: Message) -> None:
 
     msg = SerializableMessage(reply.from_user.full_name, get_member_custom_title(member), reply.text, avatar, reply.chat.id)
     await redis.enqueue("generate:jobs", msg.to_json())
-    logger.warning("Getting data")
     img = await redis.dequeue("generate:results")
 
     decoded = b64decode(img[1])
 
-    logger.warning("Sending...")
     await bot.send_photo(reply.chat.id, BufferedInputFile(decoded, "quote.png"), caption="Pretty cool, eh?")
 
 

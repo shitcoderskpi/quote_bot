@@ -12,6 +12,20 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
+constexpr std::string trim(std::string_view sv, const std::string_view &what = " \t\n\r") {
+    sv.remove_prefix(std::min(sv.find_first_not_of(what), sv.size()));
+    sv.remove_suffix(sv.size() - std::min(sv.find_last_not_of(what) + 1, sv.size()));
+    return std::string(sv);
+}
+
+constexpr std::string trim(const char* s, const std::string_view& what = " \t\n\r") {
+    return trim(std::string_view(s ? s : ""), what);
+}
+
+constexpr std::string trim(const std::string& s, const std::string_view &what = " \t\n\r") {
+    return trim(std::string_view(s), what);
+}
+
 inline std::shared_ptr<spdlog::logger> logger_init(const std::string &name,
                                                    const spdlog::level::level_enum lvl = spdlog::level::debug,
                                                    const std::string &pattern = "[%Y-%m-%d %H:%M:%S.%e %^%l%$] %n: %v") {

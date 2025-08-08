@@ -15,18 +15,32 @@
 
 namespace pango {
 
+    struct font_metrics {
+        explicit font_metrics(PangoFontMetrics *metrics) noexcept : metrics(metrics) {}
+        ~font_metrics() noexcept;
+
+        [[nodiscard]] int ascent() const;
+        [[nodiscard]] int descent() const;
+        [[nodiscard]] int height() const;
+
+    private:
+        PangoFontMetrics *metrics;
+    };
+
     struct raster_text {
         int width;
         int height;
         cairo_surface_t *surface;
         unsigned char* data;
         unsigned long stride;
+        font_metrics metrics;
 
-        raster_text(int width, int height, cairo_surface_t *surface, unsigned char *data, int stride) noexcept;
+        raster_text(int width, int height, cairo_surface_t *surface, PangoFontMetrics *metrics, unsigned char *data,
+                    int stride) noexcept;
+
         ~raster_text() noexcept;
     };
 
-    // TODO: add support for font families
     class rasterizer {
         public:
         rasterizer() noexcept;
@@ -36,6 +50,8 @@ namespace pango {
 
     private:
         std::shared_ptr<spdlog::logger> logger;
+#ifdef DEBUG
+        static constinit inline int __color_index {};
         static constexpr std::array<unsigned char, 4> red {255, 255, 0, 0};
         static constexpr std::array<std::array<unsigned char, 4>, 6> debug_colors {
             red,
@@ -45,10 +61,7 @@ namespace pango {
             {255, 255, 255, 0},
             {255, 239, 191, 4}
         };
-
-        // TODO: use dynamic bases (e.g. using font size config ???)
-        static constexpr int base_width = 300;
-        static constexpr int base_height = 50;
+#endif
 
     };
 

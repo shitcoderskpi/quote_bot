@@ -30,7 +30,7 @@ namespace templates {
         file.read(buffer, length);
 
         const auto template_name = path.stem().string();
-        const auto img = _preprocessor.preprocess(buffer);
+        const auto img = _preprocessor.preprocess(buffer, "sans-serif");
         templates.emplace(template_name, img);
         logger->info("Template {} is loaded successfully", template_name);
 
@@ -75,7 +75,7 @@ namespace templates {
             std::stringstream ss;
             ss << file.rdbuf();
 
-            const auto img = _preprocessor.preprocess(ss.str());
+            const auto img = _preprocessor.preprocess(ss.str(), "sans-serif");
 
             templates.emplace(template_name, img);
             logger->info("Template {} is loaded successfully", template_name);

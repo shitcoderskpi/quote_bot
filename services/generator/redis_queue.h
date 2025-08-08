@@ -43,6 +43,7 @@ public:
 
     cppcoro::task<> delete_queue(const std::string &queue_name) const;
 private:
+    mutable std::mutex m;
     redisContext *c;
     std::shared_ptr<spdlog::logger> _logger;
     cppcoro::static_thread_pool& _pool;

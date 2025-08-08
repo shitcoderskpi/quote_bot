@@ -14,7 +14,7 @@ namespace pango {
 
     class text_factory {
     public:
-        static text from_node(const pugi::xml_node& node);
+        static text from_node(const pugi::xml_node &node, const std::string &fallback_font);
 
         static text from_capnp_reader(const Image::TextEntry::Reader& reader);
 
@@ -35,6 +35,8 @@ namespace pango {
         static unsigned short font_weight_to_pango(const pugi::xml_attribute &weight);
 
         static PangoAlignment capnp_to_pango_alignment(const Image::TextEntry::Alignment &a);
+
+        static std::string get_font_family(const pugi::xml_attribute &attr, const std::string &fallback);
     };
 
 } // pango

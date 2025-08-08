@@ -1,0 +1,46 @@
+warning: Error disabling address space randomization: Operation not permitted
+[2025-08-07 10:39:57.499 info] main: Logging setup is done.
+*** 1754563197.499226398 140127764125968 mg_start2:20630: [listening_ports] -> [0.0.0.0:8080]
+*** 1754563197.499233432 140127764125968 mg_start2:20630: [num_threads] -> [2]
+[New LWP 21]
+*** 1754563197.499704362 140127763798832 consume_socket:19629: going idle
+[New LWP 22]
+*** 1754563197.499825884 140127761677104 consume_socket:19629: going idle
+[New LWP 23]
+[2025-08-07 10:39:57.499 debug] main: Exposed prometheus on 0.0.0.0:8080
+[New LWP 24]
+[New LWP 25]
+[New LWP 26]
+[New LWP 27]
+[2025-08-07 10:39:57.500 debug] template_storage: Loading template file templates/tg_template.svg
+[2025-08-07 10:39:57.500 info] template_storage: Template tg_template is loaded successfully
+[2025-08-07 10:39:57.501 info] main: Redis started at redis:6379
+*** 1754563203.174700964 140127759534896 accept_new_connection:19978: Accepted socket 5
+*** 1754563203.174735690 140127759534896 produce_socket:19687: queued socket 5
+*** 1754563203.174753855 140127763798832 consume_socket:19643: grabbed socket 5, going busy
+*** 1754563203.174771689 140127763798832 worker_thread_run:19799: Incoming connection from 172.18.0.2
+*** 1754563203.174775696 140127763798832 process_new_connection:19382: Start processing connection from 172.18.0.2
+*** 1754563203.174777941 140127763798832 process_new_connection:19388: calling get_request (1 times for this connection)
+*** 1754563203.174800614 140127763798832 switch_domain_context:14220: HTTP Host: generator
+*** 1754563203.174804141 140127763798832 process_new_connection:19472: http: 1.1, error: none
+*** 1754563203.174812296 140127763798832 handle_request:14791: REQUEST: GET /metrics
+*** 1754563203.174862933 140127763798832 open_auth_file:8535: fopen(/.htpasswd): No such file or directory
+*** 1754563203.175206480 140127763798832 handle_request:15094: websocket handling done
+*** 1754563203.175210087 140127763798832 handle_request_stat_log:6583: handle_request done
+*** 1754563203.175214806 140127763798832 process_new_connection:19544: Done processing connection from 172.18.0.2 (0.000000 sec)
+
+Thread 2 "civetweb-worker" received signal SIGSEGV, Segmentation fault.
+[Switching to LWP 21]
+0x000055e89c6e30b0 in shutdown ()
+#0  0x000055e89c6e30b0 in shutdown ()
+No symbol table info available.
+#1  0x000055e89c6a3cd7 in ?? ()
+No symbol table info available.
+#2  0x000055e89c6ad7da in ?? ()
+No symbol table info available.
+#3  0x00007f720b7ec9d2 in start (p=0x7f7209956220) at src/thread/pthread_create.c:207
+        args = 0x7f7209956220
+        state = <optimized out>
+#4  0x00007f720b7ee314 in __clone () at src/thread/x86_64/clone.s:22
+No locals.
+Backtrace stopped: frame did not save the PC

@@ -31,7 +31,10 @@ public:
 private:
     std::shared_ptr<spdlog::logger> logger;
 
-    static Magick::Point calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text, const Magick::Point &scale);
+    static Magick::Point calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text, const pango::raster_text &r_text, const
+                                           Magick::Point &scale);
+
+    static double calculate_baseline(const pango::raster_text &raster, const Magick::Point &scale);
 
     static long alignment_to_offset(const PangoAlignment &alignment, const long &text_width);
 };
@@ -43,6 +46,7 @@ inline renderer::renderer() noexcept {
 
 inline Magick::Image renderer::render_image(const templates::image &img, const Magick::Point &density = Magick::Point(300, 300)) const {
     Magick::Image bg;
+    bg.backgroundColor(Magick::Color("transparent"));
     bg.density(density);
     bg.read(Magick::Blob {img.background.data(), img.background.size()});
 
@@ -58,7 +62,7 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
         text.read(result.width, result.height, "BGRA", Magick::CharPixel, result.data);
         text.trim();
 
-        const auto offset = calculate_offsets(text, bg, entry, scale);
+        const auto offset = calculate_offsets(text, bg, entry, result, scale);
 
         bg.composite(text, Magick::Geometry{0, 0, static_cast<long int>(offset.x()), static_cast<long int>(offset.y())}, Magick::OverCompositeOp);
     }
@@ -66,22 +70,28 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
     return bg;
 }
 
-inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text,
+inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text, const pango::raster_text& r_text,
     const Magick::Point &scale) {
 
-    const auto baseline_offset = t_img.rows() * 0.85;
-    const long x_offset = static_cast<ssize_t>(clamp(
+    const double x_offset = clamp(
         0.0,
         text.x * scale.x() + alignment_to_offset(text.alignment, static_cast<long>(t_img.columns())),
         static_cast<double>(bg.columns())
-        ));
-    const long y_offset = static_cast<ssize_t>(clamp(
+        );
+    const double y_offset = clamp(
         0.0,
-        text.y * scale.y() - baseline_offset,
+        text.y * scale.y() + calculate_baseline(r_text, scale),
         static_cast<double>(bg.rows())
-        ));
+        );
 
-    return {static_cast<double>(x_offset), static_cast<double>(y_offset)};
+    return {x_offset, y_offset};
+}
+
+inline double renderer::calculate_baseline(const pango::raster_text &raster, const Magick::Point &scale) {
+    const double ascent  = raster.metrics.ascent()  * scale.y();
+    const double descent = raster.metrics.descent() * scale.y();
+
+    return -std::round(ascent - (ascent + descent) / 2.0 + descent * 0.5);
 }
 
 inline long renderer::alignment_to_offset(const PangoAlignment &alignment, const long &text_width) {

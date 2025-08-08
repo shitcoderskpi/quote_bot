@@ -58,7 +58,7 @@ struct Image::TextEntry {
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(b72c1368138cc9cb, 2, 3)
+    CAPNP_DECLARE_STRUCT_HEADER(b72c1368138cc9cb, 2, 4)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -182,6 +182,9 @@ public:
 
   inline  ::int32_t getY() const;
 
+  inline bool hasFontFamily() const;
+  inline  ::capnp::Text::Reader getFontFamily() const;
+
   inline bool hasSize() const;
   inline  ::capnp::Text::Reader getSize() const;
 
@@ -234,6 +237,13 @@ public:
 
   inline  ::int32_t getY();
   inline void setY( ::int32_t value);
+
+  inline bool hasFontFamily();
+  inline  ::capnp::Text::Builder getFontFamily();
+  inline void setFontFamily( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initFontFamily(unsigned int size);
+  inline void adoptFontFamily(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownFontFamily();
 
   inline bool hasSize();
   inline  ::capnp::Text::Builder getSize();
@@ -416,38 +426,72 @@ inline void Image::TextEntry::Builder::setY( ::int32_t value) {
       ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
-inline bool Image::TextEntry::Reader::hasSize() const {
+inline bool Image::TextEntry::Reader::hasFontFamily() const {
   return !_reader.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
 }
-inline bool Image::TextEntry::Builder::hasSize() {
+inline bool Image::TextEntry::Builder::hasFontFamily() {
   return !_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS).isNull();
 }
-inline  ::capnp::Text::Reader Image::TextEntry::Reader::getSize() const {
+inline  ::capnp::Text::Reader Image::TextEntry::Reader::getFontFamily() const {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline  ::capnp::Text::Builder Image::TextEntry::Builder::getSize() {
+inline  ::capnp::Text::Builder Image::TextEntry::Builder::getFontFamily() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline void Image::TextEntry::Builder::setSize( ::capnp::Text::Reader value) {
+inline void Image::TextEntry::Builder::setFontFamily( ::capnp::Text::Reader value) {
   ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS), value);
 }
-inline  ::capnp::Text::Builder Image::TextEntry::Builder::initSize(unsigned int size) {
+inline  ::capnp::Text::Builder Image::TextEntry::Builder::initFontFamily(unsigned int size) {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS), size);
 }
-inline void Image::TextEntry::Builder::adoptSize(
+inline void Image::TextEntry::Builder::adoptFontFamily(
     ::capnp::Orphan< ::capnp::Text>&& value) {
   ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::capnp::Text> Image::TextEntry::Builder::disownSize() {
+inline ::capnp::Orphan< ::capnp::Text> Image::TextEntry::Builder::disownFontFamily() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
       ::capnp::bounded<1>() * ::capnp::POINTERS));
+}
+
+inline bool Image::TextEntry::Reader::hasSize() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool Image::TextEntry::Builder::hasSize() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader Image::TextEntry::Reader::getSize() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder Image::TextEntry::Builder::getSize() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void Image::TextEntry::Builder::setSize( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder Image::TextEntry::Builder::initSize(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void Image::TextEntry::Builder::adoptSize(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> Image::TextEntry::Builder::disownSize() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
 }
 
 inline  ::uint16_t Image::TextEntry::Reader::getWeight() const {
@@ -480,36 +524,36 @@ inline void Image::TextEntry::Builder::setAlignment( ::Image::TextEntry::Alignme
 
 inline bool Image::TextEntry::Reader::hasColor() const {
   return !_reader.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
 }
 inline bool Image::TextEntry::Builder::hasColor() {
   return !_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
 }
 inline  ::capnp::Text::Reader Image::TextEntry::Reader::getColor() const {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
 }
 inline  ::capnp::Text::Builder Image::TextEntry::Builder::getColor() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
 }
 inline void Image::TextEntry::Builder::setColor( ::capnp::Text::Reader value) {
   ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
 }
 inline  ::capnp::Text::Builder Image::TextEntry::Builder::initColor(unsigned int size) {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
 }
 inline void Image::TextEntry::Builder::adoptColor(
     ::capnp::Orphan< ::capnp::Text>&& value) {
   ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
 }
 inline ::capnp::Orphan< ::capnp::Text> Image::TextEntry::Builder::disownColor() {
   return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
-      ::capnp::bounded<2>() * ::capnp::POINTERS));
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
 }
 
 inline  ::int32_t Image::TextEntry::Reader::getWrapWidth() const {

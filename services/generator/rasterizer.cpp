@@ -14,21 +14,33 @@
 #include "text.h"
 
 namespace pango {
+    font_metrics::~font_metrics() noexcept {
+        if (metrics) pango_font_metrics_unref(metrics);
+    }
 
-    raster_text::raster_text(const int width, const int height, cairo_surface_t *surface, unsigned char *data,
-        const int stride) noexcept {
+    int font_metrics::ascent() const {
+        return metrics->ascent / PANGO_SCALE;
+    }
+
+    int font_metrics::descent() const {
+        return metrics->descent / PANGO_SCALE;
+    }
+
+    int font_metrics::height() const {
+        return metrics->height / PANGO_SCALE;
+    }
+
+    raster_text::raster_text(const int width, const int height, cairo_surface_t *surface, PangoFontMetrics *metrics, unsigned char *data,
+                             const int stride) noexcept: width(width), height(height), stride(stride), metrics(metrics) {
         if (surface == nullptr || data == nullptr) {
             return;
         }
-        this->width = width;
-        this->height = height;
         this->surface = surface;
         this->data = data;
-        this->stride = stride;
     }
 
     raster_text::~raster_text() noexcept {
-        if (surface != nullptr) cairo_surface_destroy(surface);
+        if (surface) cairo_surface_destroy(surface);
     }
 
     rasterizer::rasterizer() noexcept : logger(logger_init("rasterizer")) {}
@@ -40,35 +52,50 @@ namespace pango {
     }
 
     raster_text rasterizer::raster(const text &t, const Magick::Point &scale) {
-        const int surf_width = static_cast<int>(base_width * scale.x());
-        const int surf_height = static_cast<int>(base_height * scale.y());
+        cairo_surface_t* dummy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t* dummy_cr = cairo_create(dummy);
 
-        cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_width, surf_height);
-        cairo_t* cr = cairo_create(surface);
+        PangoLayout* layout = pango_cairo_create_layout(dummy_cr);
+        const auto markup = to_string(t);
+        pango_layout_set_markup(layout, markup.c_str(), markup.length());
+
+        PangoFontDescription* font = pango_font_description_from_string(t.font_description().c_str());
+        pango_layout_set_font_description(layout, font);
+
+        PangoContext* context = pango_layout_get_context(layout);
+        PangoFontMetrics *metrics = pango_context_get_metrics(context, font, pango_context_get_language(context));
+
+        int width, height;
+        pango_layout_get_pixel_size(layout, &width, &height);
+        const int surf_width = static_cast<double>(width + 10) * scale.x();
+        const int surf_height = static_cast<double>(height) * scale.y();
+
+        pango_font_description_free(font);
+        cairo_surface_destroy(dummy);
+        cairo_destroy(dummy_cr);
+
+        const auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_width, surf_height);
+        const auto cr = cairo_create(surface);
+
+
+#ifdef DEBUG
+        const auto color = debug_colors.at(__color_index++ % debug_colors.size());
+        cairo_set_source_rgba(cr, static_cast<double>(color.at(1)) / 255, static_cast<double>(color.at(2)) / 255, static_cast<double>(color.at(3)) / 255, static_cast<double>(color.at(0)) / 255);
+        cairo_paint(cr);
+#endif
 
         cairo_scale(cr, scale.x(), scale.y());
-
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
-        cairo_paint(cr);
-
-        PangoLayout* layout = pango_cairo_create_layout(cr);
-        const auto markup = to_string(t);
-
-        PangoFontDescription* font = pango_font_description_from_string("sans-serif");
-        pango_layout_set_font_description(layout, font);
-        pango_font_description_free(font);
-
-        pango_layout_set_markup(layout, markup.c_str(), markup.length());
         pango_layout_set_width(layout, surf_width * PANGO_SCALE);
+        pango_cairo_update_context(cr, pango_layout_get_context(layout));
+        pango_cairo_update_layout(cr, layout);
         pango_cairo_show_layout(cr, layout);
 
         g_object_unref(layout);
-        cairo_destroy(cr);
 
         cairo_surface_flush(surface);
         const auto data = cairo_image_surface_get_data(surface);
         const int stride = cairo_image_surface_get_stride(surface);
 
-        return raster_text {surf_width, surf_height, surface, data, stride};
+        return raster_text {surf_width, surf_height, surface, metrics, data, stride};
     }
 } // pango

@@ -17,11 +17,12 @@ void image_serializer::serialize_image(const templates::image &img, const std::f
     auto text_builder = img_builder.initTextEntries(img.text_entries.size());
     for (size_t i = 0; i < img.text_entries.size(); ++i) {
         auto builder = text_builder[i];
-        const auto&[content, x, y, size, weight, alignment, color, wrap_width] = img.text_entries[i];
+        const auto&[content, x, y, font_family, size, weight, alignment, color, wrap_width] = img.text_entries[i];
 
         builder.setContent(content);
         builder.setX(x);
         builder.setY(y);
+        builder.setFontFamily(font_family);
         builder.setSize(size);
         builder.setWeight(weight);
         builder.setAlignment(_pango_to_capnp_alignment<capnp::schemas::Alignment_cda29255ea1e0512>(alignment));

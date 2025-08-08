@@ -27,6 +27,8 @@ redis_queue::~redis_queue() {
 cppcoro::task<redis_reply> redis_queue::enqueue(const std::string &queue_name, const char *data) const {
     co_await _pool.schedule();
 
+    std::scoped_lock lock {m};
+
     redis_reply reply {redisCommand(c, "LPUSH %s %s", queue_name.c_str(), data)};
 
     co_return std::move(reply);
@@ -35,6 +37,8 @@ cppcoro::task<redis_reply> redis_queue::enqueue(const std::string &queue_name, c
 cppcoro::task<redis_reply> redis_queue::dequeue(const std::string &queue_name, const size_t timeout) const {
     co_await _pool.schedule();
 
+    std::scoped_lock lock {m};
+
     redis_reply reply {redisCommand(c, "BRPOP %s %d", queue_name.c_str(), timeout)};
 
     co_return std::move(reply);
@@ -42,6 +46,8 @@ cppcoro::task<redis_reply> redis_queue::dequeue(const std::string &queue_name, c
 
 cppcoro::task<size_t> redis_queue::size(const std::string &queue_name) const {
     co_await _pool.schedule();
+
+    std::scoped_lock lock {m};
 
     if (const redis_reply reply { redisCommand(c, "LLEN %s", queue_name) }; reply.has_value()) {
         if (reply.get_type().value() == REDIS_REPLY_INTEGER) {
@@ -55,6 +61,8 @@ cppcoro::task<size_t> redis_queue::size(const std::string &queue_name) const {
 
 cppcoro::task<> redis_queue::delete_queue(const std::string &queue_name) const {
     co_await _pool.schedule();
+
+    std::scoped_lock lock {m};
 
     redisCommand(c, "DEL %s" , queue_name.c_str());
 
