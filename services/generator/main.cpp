@@ -1,4 +1,5 @@
 #include <csignal>
+#include <iostream>
 #include <string>
 #include <spdlog/spdlog.h>
 
@@ -8,6 +9,7 @@
 #include "prometheus/registry.h"
 #include <Magick++.h>
 
+#include "json_parser.h"
 #include "renderer.h"
 #include "cppcoro/sync_wait.hpp"
 #include "storage.h"
@@ -111,25 +113,24 @@ int main()
     logger->info("Redis started at {}:{}", redis_host, 6379);
 
     const auto preprocessor = templates::preprocessor {};
+    auto parser = request_json_parser {};
     while (!shutdown) {
         //==================================================================//
         //!!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT NOTE !!!!!!!!!!!!!!!!!!!!!!!!!//
         //------------------------------------------------------------------//
         // >>> Now assuming that reply looks like this:                     //
-        //      "queue_name", "svg data";                                   //
-        //------------------------------------------------------------------//
-        // >>> Some time after when I'll implement json reader:             //
         //      "queue_name", "{                                            //
-        //              "id": id,                                           //
+        //              "chat_id": id,                                      //
         //              "template": "svg data"                              //
         //      }"                                                          //
         //------------------------------------------------------------------//
-        // >>> Even more time after when I'll implement zstd compression:   //
+        // >>> Some time after when I'll implement zstd compression:        //
         //      "queue_name", "zstd compressed data (json)"                 //
         //==================================================================//
 
         if (auto reply = cppcoro::sync_wait(queue.dequeue(queue_name, 0)); reply.has_value()) {
-            const auto img = preprocessor.preprocess(reply.get_array().value()[1].get_str().value(), "sans-serif");
+            const auto [chat_id, svg_template] = parser.parse(reply.get_array().value()[1].get_str().value());
+            const auto img = preprocessor.preprocess(svg_template, "sans-serif");
             auto result = r.render_image(img, Magick::Point {300, 300});
 
             result.quantizeColorSpace(Magick::ColorspaceType::DisplayP3Colorspace);
@@ -142,6 +143,7 @@ int main()
             logger->debug("Using {} bits per channel, color space: {}, alpha channel: {}", result.depth(), colorspace_type_to_string(result.colorSpace()), result.alpha());
 
             logger->debug("Enqueuing data to results queue");
+            result.write("output.webp");
             cppcoro::sync_wait(queue.enqueue("generate:results", image_to_base64(result)));
         } else {
             logger->error("Bad data was received");

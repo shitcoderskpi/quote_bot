@@ -48,7 +48,7 @@ namespace templates {
 
     inline image preprocessor::preprocess(const std::string &input, const std::string &fallback_font) const {
         pugi::xml_document doc;
-        if (const pugi::xml_parse_result result = doc.load_string(input.c_str()); !result) {
+        if (const pugi::xml_parse_result result = doc.load_string(input.data()); !result) {
             logger->error("Failed to parse XML document: {}", result.description());
             return {input, {}};
         }

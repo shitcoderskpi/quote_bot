@@ -4,7 +4,6 @@
 
 #ifndef IMAGE_SERIALIZER_H
 #define IMAGE_SERIALIZER_H
-#include "image.capnp.h"
 #include "preprocessor.h"
 
 

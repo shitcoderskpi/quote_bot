@@ -7,7 +7,6 @@
 #include <pugixml.hpp>
 #include <unordered_map>
 
-#include "image.capnp.h"
 #include "text.h"
 
 namespace pango {
@@ -16,7 +15,6 @@ namespace pango {
     public:
         static text from_node(const pugi::xml_node &node, const std::string &fallback_font);
 
-        static text from_capnp_reader(const Image::TextEntry::Reader& reader);
 
     private:
         static inline const std::unordered_map<std::string, PangoAlignment> alignment_map{
@@ -34,7 +32,7 @@ namespace pango {
 
         static unsigned short font_weight_to_pango(const pugi::xml_attribute &weight);
 
-        static PangoAlignment capnp_to_pango_alignment(const Image::TextEntry::Alignment &a);
+        // static PangoAlignment capnp_to_pango_alignment(const Image::TextEntry::Alignment &a);
 
         static std::string get_font_family(const pugi::xml_attribute &attr, const std::string &fallback);
     };

@@ -8,8 +8,6 @@
 
 #include "storage.h"
 
-#include "image_serializer.h"
-
 namespace templates {
     void storage::load_template(const std::filesystem::path &path) {
         if (!std::filesystem::exists(path) || !std::filesystem::is_regular_file(path)) {

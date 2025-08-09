@@ -12,28 +12,8 @@ find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
-find_package(CapnProto REQUIRED)
-
-get_target_property(CAPNP_EXECUTABLE CapnProto::capnp_tool IMPORTED_LOCATION)
-get_filename_component(CAPNP_DIR ${CAPNP_EXECUTABLE} DIRECTORY)
-set(ENV{PATH} "$ENV{PATH}:${CAPNP_DIR}")
-
-find_program(CAPNP_EXECUTABLE capnp
-        HINTS ${CAPNP_ROOT_DIR}/bin
-        PATHS /usr/local/bin /usr/bin
-        DOC "Cap'n Proto compiler"
-)
-
-if(NOT CAPNP_EXECUTABLE)
-    message(FATAL_ERROR "Could not find capnp executable")
-endif()
-
-set(CAPNP_SCHEMA image.capnp)
-
-capnp_generate_cpp(
-        CAPNP_SRCS CAPNP_HDRS
-        ${CAPNP_SCHEMA}
-)
+find_package(OpenMP REQUIRED)
+find_package(simdjson REQUIRED)
 
 find_library(PUGIXML_LIBRARY NAMES pugixml)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
@@ -63,8 +43,6 @@ add_library(kernel
         redis_queue.h
         redis_reply.cpp
         redis_reply.h
-        storage.h
-        storage.cpp
         preprocessor.cpp
         preprocessor.h
         image.cpp
@@ -77,8 +55,8 @@ add_library(kernel
         renderer.h
         rasterizer.cpp
         rasterizer.h
-        image_serializer.cpp
-        image_serializer.h
+        json_parser.cpp
+        json_parser.h
 )
 target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
@@ -105,8 +83,8 @@ target_link_libraries(kernel
         ${CAIRO_LIBRARIES}
         ${PANGO_LIBRARIES}
         ${PANGOCAIRO_LIBRARIES}
-        CapnProto::capnp
-        CapnProto::kj
+        OpenMP::OpenMP_CXX
+        simdjson
 )
 
 add_definitions(
@@ -137,8 +115,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 # Tests (using googletest)
 add_executable(test_project tests/redis_tests.cpp
-        tests/template_storage_tests.cpp
-        tests/preproccessor_tests.cpp)
+        tests/preproccessor_tests.cpp
+        tests/request_json_parser_tests.cpp)
 
 target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(test_project PRIVATE ${HIREDIS_INCLUDE_DIRS})

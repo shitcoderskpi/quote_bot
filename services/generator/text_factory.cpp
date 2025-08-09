@@ -21,21 +21,6 @@ namespace pango {
         return text;
     }
 
-    text text_factory::from_capnp_reader(const Image::TextEntry::Reader &reader) {
-        text text;
-        text.content = reader.getContent();
-        text.x = reader.getX();
-        text.y = reader.getY();
-        text.font_family = reader.getFontFamily();
-        text.size = reader.getSize();
-        text.weight = reader.getWeight();
-        text.alignment = capnp_to_pango_alignment(reader.getAlignment());
-        text.color = reader.getColor();
-        text.wrap_width = reader.getWrapWidth();
-
-        return text;
-    }
-
     PangoAlignment text_factory::anchor_to_alignment(const std::string &anchor) {
         if (!alignment_map.contains(trim(anchor))) {
             return PANGO_ALIGN_LEFT;
@@ -54,15 +39,6 @@ namespace pango {
         }
 
         return weight.as_int();
-    }
-
-    PangoAlignment text_factory::capnp_to_pango_alignment(const Image::TextEntry::Alignment &a) {
-        switch (a) {
-            case Image::TextEntry::Alignment::LEFT: return PANGO_ALIGN_LEFT;
-            case Image::TextEntry::Alignment::CENTER: return PANGO_ALIGN_CENTER;
-            case Image::TextEntry::Alignment::RIGHT: return PANGO_ALIGN_RIGHT;
-            default: return PANGO_ALIGN_LEFT;
-        }
     }
 
     std::string text_factory::get_font_family(const pugi::xml_attribute &attr, const std::string &fallback) {

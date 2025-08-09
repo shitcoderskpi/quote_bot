@@ -12,7 +12,6 @@
 
 #include "globals.h"
 #include "image.h"
-#include "image_serializer.h"
 #include "preprocessor.h"
 #include "cppcoro/static_thread_pool.hpp"
 #include "cppcoro/task.hpp"
