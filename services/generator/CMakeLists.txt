@@ -14,6 +14,8 @@ find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(simdjson REQUIRED)
+pkg_check_modules(ZSTD REQUIRED libzstd)
+
 
 find_library(PUGIXML_LIBRARY NAMES pugixml)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
@@ -57,9 +59,14 @@ add_library(kernel
         rasterizer.h
         json_parser.cpp
         json_parser.h
+        response.cpp
+        response.h
+        compressor.cpp
+        compressor.h
 )
 target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
+target_include_directories(kernel PRIVATE ${ZSTD_INCLUDE_DIRS})
 target_include_directories(kernel PRIVATE ${ImageMagick_INCLUDE_DIRS})
 target_compile_definitions(kernel PRIVATE $<$<CONFIG:Debug>:DEBUG>)
 target_include_directories(kernel PRIVATE extern/prometheus-cpp/core/include})
@@ -85,6 +92,7 @@ target_link_libraries(kernel
         ${PANGOCAIRO_LIBRARIES}
         OpenMP::OpenMP_CXX
         simdjson
+        ${ZSTD_LIBRARIES}
 )
 
 add_definitions(
@@ -116,7 +124,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Tests (using googletest)
 add_executable(test_project tests/redis_tests.cpp
         tests/preproccessor_tests.cpp
-        tests/request_json_parser_tests.cpp)
+        tests/request_json_parser_tests.cpp
+        tests/compressor_tests.cpp)
 
 target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(test_project PRIVATE ${HIREDIS_INCLUDE_DIRS})

@@ -14,23 +14,6 @@
 
 namespace templates {
 
-    struct string_writer final : pugi::xml_writer {
-        std::string &out;
-        explicit string_writer(std::string &o) : out(o) {}
-        void write(const void* data, const size_t size) override {
-            out.append(static_cast<const char*>(data), size);
-        }
-    };
-
-    static bool node_has_local_name_text(const pugi::xml_node& n) {
-        const char* nm = n.name();
-        if (!nm || nm[0] == '\0') return false;
-        const char* colon = std::strrchr(nm, ':');
-        if (!colon) return std::strcmp(nm, "text") == 0;
-        return std::strcmp(colon + 1, "text") == 0;
-    }
-
-
     class preprocessor {
         public:
         preprocessor() noexcept;

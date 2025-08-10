@@ -16,7 +16,10 @@ RUN apk add --no-cache \
     cairo-dev \
     pango-dev \
     simdjson-dev \
-    simdjson-static
+    simdjson-static \
+    zstd-dev \
+    zstd-static \
+    zstd-libs
 
 COPY . .
 
@@ -24,7 +27,7 @@ COPY . .
 RUN sed -i 's/ftruncate64/ftruncate/g' /app/extern/cppcoro/lib/writable_file.cpp
 
 RUN mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo .. &&\
+    cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/usr/lib .. &&\
     cmake --build . -j$(nproc) && \
     strip --strip-unneeded generator
 
@@ -45,7 +48,8 @@ RUN apk add --no-cache \
     font-noto-emoji \
     pugixml \
     font-noto \
-    simdjson
+    simdjson \
+    zstd
 
 COPY --from=builder /app/build/generator .
 
