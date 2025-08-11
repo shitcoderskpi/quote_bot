@@ -13,10 +13,14 @@
 #include "response.h"
 #include "cppcoro/sync_wait.hpp"
 #include "storage.h"
+#include "prometheus/counter.h"
+#include "prometheus/exposer.h"
+#include "prometheus/registry.h"
 
 int main()
 {
     const std::string queue_name = "generate:jobs";
+    constexpr auto prometheus_host = "127.0.0.1:8080";
 
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
@@ -31,8 +35,21 @@ int main()
         exit(EXIT_FAILURE);
     }
 
-    const unsigned int cores = std::thread::hardware_concurrency();
+    auto registry = std::make_shared<prometheus::Registry>();
 
+    // NOTE:
+    // Without patch will segfault:
+    prometheus::Exposer exposer{prometheus_host};
+
+    auto& requests_counter = prometheus::BuildCounter()
+        .Name("redis_requests_total")
+        .Help("Total number of Redis requests handled")
+        .Register(*registry)
+        .Add({{"operation", "BRPOP"}});
+
+    exposer.RegisterCollectable(registry);
+
+    const unsigned int cores = std::thread::hardware_concurrency();
     logger->debug("Hardware concurrency: {}", cores);
 
     cppcoro::static_thread_pool thread_pool {cores};
@@ -67,6 +84,7 @@ int main()
                 throw std::runtime_error("");
             }
 
+            requests_counter.Increment();
             const auto decompressed = compressor::decompress(reply.get_array().value()[1].get_str().value());
             if (decompressed.empty()) {
                 logger->error("Could not decompress given data: {}.", reply.get_array().value()[1].get_str().value());

@@ -4,3 +4,6 @@
 [submodule "services/generator/extern/cppcoro"]
 	path = services/generator/extern/cppcoro
 	url = https://github.com/andreasbuhr/cppcoro.git
+[submodule "services/generator/services/generator/extern/prometheus-cpp"]
+	path = services/generator/services/generator/extern/prometheus-cpp
+	url = https://github.com/jupp0r/prometheus-cpp.git

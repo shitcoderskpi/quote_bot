@@ -33,6 +33,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 add_subdirectory(extern/cppcoro)
+add_subdirectory(extern/prometheus-cpp)
 
 # Core (named `kernel` because of prometheus-cpp's core lib conflicting)
 add_library(kernel
@@ -101,7 +102,7 @@ add_executable(${PROJECT_NAME} main.cpp)
 target_compile_definitions(${PROJECT_NAME} PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(${PROJECT_NAME} PRIVATE ${HIREDIS_INCLUDE_DIRS})
 target_include_directories(${PROJECT_NAME} PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE extern/prometheus-cpp/core/include})
+target_include_directories(${PROJECT_NAME} PRIVATE extern/prometheus-cpp})
 target_include_directories(${PROJECT_NAME} PRIVATE extern/cppcoro/include)
 target_include_directories(${PROJECT_NAME} PRIVATE
         ${CAIRO_INCLUDE_DIRS}
@@ -113,6 +114,8 @@ link_directories(${PANGO_LIBRARY_DIRS})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         kernel
+        prometheus-cpp::core
+        prometheus-cpp::pull
 )
 
 # Tests (using googletest)
