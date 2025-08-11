@@ -23,10 +23,6 @@ pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PANGO REQUIRED pango)
 pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
 
-cmake_policy(SET CMP0002 NEW)
-set(ENABLE_TESTING OFF CACHE BOOL "Disable tests in prometheus-cpp" FORCE)
-add_subdirectory(extern/prometheus-cpp EXCLUDE_FROM_ALL)
-
 enable_testing()
 
 include(FetchContent)
@@ -81,8 +77,6 @@ link_directories(${PANGO_LIBRARY_DIRS})
 target_link_libraries(kernel
         spdlog::spdlog
         ${HIREDIS_LINK_LIBRARIES}
-        prometheus-cpp::core
-        prometheus-cpp::pull
         cppcoro
         ${ImageMagick_LIBRARIES}
         OpenSSL::Crypto

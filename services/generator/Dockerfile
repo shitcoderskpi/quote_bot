@@ -53,13 +53,8 @@ RUN apk add --no-cache \
 
 COPY --from=builder /app/build/generator .
 
-#COPY ./entrypoint.sh ./entrypoint.sh
-
 COPY templates/ ./templates/
-
-#RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8080
 
-#ENTRYPOINT ["./entrypoint.sh"]
 ENTRYPOINT ["./generator"]

@@ -100,6 +100,9 @@ public:
     [[nodiscard]] size_t size() const noexcept { return len; }
 
     redis_reply operator[](const size_t idx) const {
+        if (idx >= len) {
+            throw std::out_of_range("index out of range");
+        }
         return redis_reply { _ptr[idx], false};
     }
 

@@ -5,8 +5,6 @@
 
 #include "Magick++/Image.h"
 #include "redis_queue.h"
-#include "prometheus/exposer.h"
-#include "prometheus/registry.h"
 #include <Magick++.h>
 
 #include "compressor.h"
@@ -18,8 +16,6 @@
 
 int main()
 {
-    using namespace prometheus;
-    constexpr auto prometheus_host = "0.0.0.0:8080";
     const std::string queue_name = "generate:jobs";
 
     std::signal(SIGINT, sig_handler);
@@ -29,31 +25,17 @@ int main()
     const auto logger = logger_init("main");
     logger->info("Logging setup is done.");
 
-    //================================================================//
-    //                             FIXME:                             //
-    //----------------------------------------------------------------//
-    //        THERE IS SOME WIERD ISSUE WITH `civetweb` WORKER        //
-    //                        IT SEGFAULTS                            //
-    //                   ONLY IN DOCKER CONTAINER                     //
-    //            BACKTRACE IN `infra/core/backtrace.txt`             //
-    //----------------------------------------------------------------//
-    // Exposer exposer {prometheus_host};                             //
-    // logger->debug("Exposed prometheus on {}", prometheus_host);    //
-    //                                                                //
-    // // metrics registry                                            //
-    // auto registry = std::make_shared<Registry>();                  //
-    //                                                                //
-    // exposer.RegisterCollectable(registry);                         //
-    //================================================================//
-
     const auto redis_host = getenv("REDIS_HOST");
     if (redis_host == nullptr) {
         logger->critical("REDIS_HOST is not set in the environment.");
         exit(EXIT_FAILURE);
     }
 
-    // TODO: use cli args to set number of threads
-    cppcoro::static_thread_pool thread_pool {4};
+    const unsigned int cores = std::thread::hardware_concurrency();
+
+    logger->debug("Hardware concurrency: {}", cores);
+
+    cppcoro::static_thread_pool thread_pool {cores};
 
     const renderer r {};
     const redis_queue queue {redis_host, 6379, thread_pool};
@@ -68,7 +50,7 @@ int main()
         // >>> Now assuming that reply looks like this:                     //
         //      "queue_name", "zstd compressed data (json)"                 //
         //------------------------------------------------------------------//
-        // >>> After decompressing:
+        // >>> After decompressing:                                         //
         //      "queue_name", "{                                            //
         //              "chat_id": id,                                      //
         //              "template": "svg data"                              //
@@ -76,6 +58,15 @@ int main()
         //==================================================================//
 
         if (auto reply = cppcoro::sync_wait(queue.dequeue(queue_name, 0)); reply.has_value()) {
+            if (reply.get_type().value() == REDIS_REPLY_ERROR) {
+                const auto err_str = reply.get_str().value();
+                logger->error("Redis error: {}", err_str);
+                if (err_str.starts_with("MISCONF Valkey is configured to save RDB snapshots")) {
+                    logger->error("Try restarting redis server.");
+                }
+                throw std::runtime_error("");
+            }
+
             const auto decompressed = compressor::decompress(reply.get_array().value()[1].get_str().value());
             if (decompressed.empty()) {
                 logger->error("Could not decompress given data: {}.", reply.get_array().value()[1].get_str().value());
