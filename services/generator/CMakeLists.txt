@@ -33,7 +33,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 add_subdirectory(extern/cppcoro)
-add_subdirectory(extern/prometheus-cpp)
+
+cmake_policy(SET CMP0002 NEW)
+set(ENABLE_TESTING OFF CACHE BOOL "Disable tests in prometheus-cpp" FORCE)
+add_subdirectory(extern/prometheus-cpp EXCLUDE_FROM_ALL)
 
 # Core (named `kernel` because of prometheus-cpp's core lib conflicting)
 add_library(kernel

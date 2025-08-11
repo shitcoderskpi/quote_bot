@@ -20,7 +20,7 @@
 int main()
 {
     const std::string queue_name = "generate:jobs";
-    constexpr auto prometheus_host = "127.0.0.1:8080";
+    constexpr auto prometheus_host = "0.0.0.0:8080";
 
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
