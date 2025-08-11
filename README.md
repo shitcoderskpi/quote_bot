@@ -2,7 +2,7 @@
 ```bash
 git clone https://github.com/shitcoderskpi/quote_bot.git
 cd quote_bot
-git submodule --init --recursive
+git submodule update --init --recursive
 ```
 **### NOTE: Important**
 ```bash
