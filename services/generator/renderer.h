@@ -130,7 +130,11 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
 */
 #pragma omp parallel for default(none) shared(img_texts_size, img, density, bg, render_results, scale)
     for (size_t i = 0; i < img_texts_size; ++i) {
+#ifndef DEBUG
         const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale);
+#else
+        const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale, true);
+#endif
 
         Magick::Image text;
         text.density(density);
@@ -165,8 +169,8 @@ inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, con
 }
 
 inline double renderer::calculate_baseline(const pango::raster_text &raster, const Magick::Point &scale) {
-    const double ascent  = raster.metrics.ascent()  * scale.y();
-    const double descent = raster.metrics.descent() * scale.y();
+    const double ascent  = raster.metrics.ascent_px()  * scale.y();
+    const double descent = raster.metrics.descent_px() * scale.y();
 
     return -std::round(ascent - (ascent + descent) / 2.0 + descent * 0.5);
 }

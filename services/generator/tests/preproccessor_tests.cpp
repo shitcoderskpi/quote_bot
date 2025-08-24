@@ -85,11 +85,7 @@ TEST(preproccessor_tests, preprocess_invalid_xml_test) {
     // Test with invalid XML
     const std::string invalid_xml = "<svg><text>Hello</text><unclosed>";
     
-    auto [background, text_entries] = preprocessor.preprocess(invalid_xml, "sans-serif");
-    
-    // Should return original input as background and empty text entries
-    EXPECT_EQ(background, invalid_xml);
-    EXPECT_EQ(text_entries.size(), 0);
+    EXPECT_THROW(templates::preprocessor::preprocess(invalid_xml, "sans-serif"), exceptions::templates::preprocessor_error);
 }
 
 TEST(preproccessor_tests, preprocess_font_family_override_test) {

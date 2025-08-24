@@ -4,11 +4,10 @@
 
 #ifndef RASTERIZER_H
 #define RASTERIZER_H
+#include <Magick++/Geometry.h>
 #include <array>
 #include <cairo.h>
 #include <memory>
-#include <string>
-#include <Magick++/Geometry.h>
 #include <spdlog/spdlog.h>
 
 #include "text.h"
@@ -19,9 +18,12 @@ namespace pango {
         explicit font_metrics(PangoFontMetrics *metrics) noexcept : metrics(metrics) {}
         ~font_metrics() noexcept;
 
-        [[nodiscard]] int ascent() const;
-        [[nodiscard]] int descent() const;
-        [[nodiscard]] int height() const;
+        [[nodiscard]] int ascent() const noexcept;
+        [[nodiscard]] int descent() const noexcept;
+        [[nodiscard]] int height() const noexcept;
+        [[nodiscard]] int ascent_px() const noexcept;
+        [[nodiscard]] int descent_px() const noexcept;
+        [[nodiscard]] int height_px() const noexcept;
 
     private:
         PangoFontMetrics *metrics;
@@ -31,7 +33,7 @@ namespace pango {
         int width;
         int height;
         cairo_surface_t *surface;
-        unsigned char* data;
+        unsigned char *data;
         unsigned long stride;
         font_metrics metrics;
 
@@ -42,29 +44,24 @@ namespace pango {
     };
 
     class rasterizer {
-        public:
+    public:
         rasterizer() noexcept;
         ~rasterizer() noexcept;
 
-        static raster_text raster(const text &, const Magick::Point &scale);
+        static raster_text raster(const text &, const Magick::Point &, bool debug_paint = false);
+
+        static Magick::Point calculate_size(const text &, const Magick::Point &);
 
     private:
         std::shared_ptr<spdlog::logger> logger;
 #ifdef DEBUG
-        static constinit inline int __color_index {};
-        static constexpr std::array<unsigned char, 4> red {255, 255, 0, 0};
-        static constexpr std::array<std::array<unsigned char, 4>, 6> debug_colors {
-            red,
-            {255, 0, 0, 255},
-            {255, 0, 255, 0},
-            {255, 178, 255, 255},
-            {255, 255, 255, 0},
-            {255, 239, 191, 4}
-        };
+        static constinit inline int _color_index{};
+        static constexpr std::array<unsigned char, 4> red{255, 255, 0, 0};
+        static constexpr std::array<std::array<unsigned char, 4>, 6> debug_colors{
+                red, {255, 0, 0, 255}, {255, 0, 255, 0}, {255, 178, 255, 255}, {255, 255, 255, 0}, {255, 239, 191, 4}};
 #endif
-
     };
 
-} // pango
+} // namespace pango
 
-#endif //RASTERIZER_H
+#endif // RASTERIZER_H

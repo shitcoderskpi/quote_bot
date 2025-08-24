@@ -4,9 +4,9 @@
 
 #include "rasterizer.h"
 
-#include <cairo.h>
 #include <Magick++/Geometry.h>
 #include <Magick++/Include.h>
+#include <cairo.h>
 #include <pango/pangocairo.h>
 #include <spdlog/spdlog.h>
 
@@ -15,23 +15,25 @@
 
 namespace pango {
     font_metrics::~font_metrics() noexcept {
-        if (metrics) pango_font_metrics_unref(metrics);
+        if (metrics)
+            pango_font_metrics_unref(metrics);
     }
 
-    int font_metrics::ascent() const {
-        return metrics->ascent / PANGO_SCALE;
-    }
+    int font_metrics::ascent() const noexcept { return metrics->ascent; }
 
-    int font_metrics::descent() const {
-        return metrics->descent / PANGO_SCALE;
-    }
+    int font_metrics::descent() const noexcept { return metrics->descent; }
 
-    int font_metrics::height() const {
-        return metrics->height / PANGO_SCALE;
-    }
+    int font_metrics::height() const noexcept { return metrics->height; }
 
-    raster_text::raster_text(const int width, const int height, cairo_surface_t *surface, PangoFontMetrics *metrics, unsigned char *data,
-                             const int stride) noexcept: width(width), height(height), stride(stride), metrics(metrics) {
+    int font_metrics::ascent_px() const noexcept { return metrics->ascent / PANGO_SCALE; }
+
+    int font_metrics::descent_px() const noexcept { return metrics->descent / PANGO_SCALE; }
+
+    int font_metrics::height_px() const noexcept { return metrics->height / PANGO_SCALE; }
+
+    raster_text::raster_text(const int width, const int height, cairo_surface_t *surface, PangoFontMetrics *metrics,
+                             unsigned char *data, const int stride) noexcept :
+        width(width), height(height), stride(stride), metrics(metrics) {
         if (surface == nullptr || data == nullptr) {
             return;
         }
@@ -40,29 +42,30 @@ namespace pango {
     }
 
     raster_text::~raster_text() noexcept {
-        if (surface) cairo_surface_destroy(surface);
+        if (surface)
+            cairo_surface_destroy(surface);
     }
 
     rasterizer::rasterizer() noexcept : logger(logger_init("rasterizer")) {}
 
     rasterizer::~rasterizer() noexcept = default;
 
-    Magick::Point operator/(const Magick::Point & lhs, const double & rhs) {
-        return Magick::Point {lhs.x() / rhs, lhs.y() / rhs};
+    Magick::Point operator/(const Magick::Point &lhs, const double &rhs) {
+        return Magick::Point{lhs.x() / rhs, lhs.y() / rhs};
     }
 
-    raster_text rasterizer::raster(const text &t, const Magick::Point &scale) {
-        cairo_surface_t* dummy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-        cairo_t* dummy_cr = cairo_create(dummy);
+    raster_text rasterizer::raster(const text &t, const Magick::Point &scale, const bool debug_paint) {
+        cairo_surface_t *dummy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t *dummy_cr = cairo_create(dummy);
 
-        PangoLayout* layout = pango_cairo_create_layout(dummy_cr);
+        PangoLayout *layout = pango_cairo_create_layout(dummy_cr);
         const auto markup = to_string(t);
         pango_layout_set_markup(layout, markup.c_str(), markup.length());
 
-        PangoFontDescription* font = pango_font_description_from_string(t.font_description().c_str());
+        PangoFontDescription *font = pango_font_description_from_string(t.font_description().c_str());
         pango_layout_set_font_description(layout, font);
 
-        PangoContext* context = pango_layout_get_context(layout);
+        PangoContext *context = pango_layout_get_context(layout);
         PangoFontMetrics *metrics = pango_context_get_metrics(context, font, pango_context_get_language(context));
 
         int width, height;
@@ -77,11 +80,13 @@ namespace pango {
         const auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_width, surf_height);
         const auto cr = cairo_create(surface);
 
-
 #ifdef DEBUG
-        const auto color = debug_colors.at(__color_index++ % debug_colors.size());
-        cairo_set_source_rgba(cr, static_cast<double>(color.at(1)) / 255, static_cast<double>(color.at(2)) / 255, static_cast<double>(color.at(3)) / 255, static_cast<double>(color.at(0)) / 255);
-        cairo_paint(cr);
+        if (debug_paint) {
+            const auto color = debug_colors.at(_color_index++ % debug_colors.size());
+            cairo_set_source_rgba(cr, static_cast<double>(color.at(1)) / 255, static_cast<double>(color.at(2)) / 255,
+                                  static_cast<double>(color.at(3)) / 255, static_cast<double>(color.at(0)) / 255);
+            cairo_paint(cr);
+        }
 #endif
 
         cairo_scale(cr, scale.x(), scale.y());
@@ -96,6 +101,23 @@ namespace pango {
         const auto data = cairo_image_surface_get_data(surface);
         const int stride = cairo_image_surface_get_stride(surface);
 
-        return raster_text {surf_width, surf_height, surface, metrics, data, stride};
+        return raster_text{surf_width, surf_height, surface, metrics, data, stride};
     }
-} // pango
+
+    Magick::Point rasterizer::calculate_size(const text &t, const Magick::Point &scale) {
+        cairo_surface_t *dummy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t *dummy_cr = cairo_create(dummy);
+
+        PangoLayout *layout = pango_cairo_create_layout(dummy_cr);
+        const auto markup = to_string(t);
+        pango_layout_set_markup(layout, markup.c_str(), markup.length());
+
+        const PangoFontDescription *font = pango_font_description_from_string(t.font_description().c_str());
+        pango_layout_set_font_description(layout, font);
+
+        int width, height;
+        pango_layout_get_pixel_size(layout, &width, &height);
+
+        return Magick::Point{static_cast<double>(width + 10) * scale.x(), static_cast<double>(height) * scale.y()};
+    }
+} // namespace pango

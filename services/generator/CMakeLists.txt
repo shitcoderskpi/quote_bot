@@ -6,7 +6,7 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -mavx2 -O3 -march=native")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS} -Og -g -Wall")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g3 -fno-inline -fno-omit-frame-pointer -fno-strict-aliasing -Wall -Wextra")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g3 -fno-inline -fno-omit-frame-pointer -fno-strict-aliasing -Wall -Wextra -DDEBUG")
 
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -63,6 +63,7 @@ add_library(kernel
         response.h
         compressor.cpp
         compressor.h
+        exceptions.h
 )
 target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
@@ -125,7 +126,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 add_executable(test_project tests/redis_tests.cpp
         tests/preproccessor_tests.cpp
         tests/request_json_parser_tests.cpp
-        tests/compressor_tests.cpp)
+        tests/compressor_tests.cpp
+        tests/encoder_tests.cpp
+        tests/redis_compressor_tests.cpp)
 
 target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(test_project PRIVATE ${HIREDIS_INCLUDE_DIRS})

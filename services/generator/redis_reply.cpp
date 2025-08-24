@@ -7,86 +7,86 @@
 #include <algorithm>
 #include <array>
 
-redis_reply::redis_reply(redisReply *reply, const bool can_free) noexcept : can_free(can_free) {
-    _reply = reply;
+redis_reply::redis_reply(redisReply *reply, const bool can_free) noexcept
+    : can_free(can_free) {
+  _reply = reply;
 }
 
-redis_reply::redis_reply(void *reply, const bool can_free): can_free(can_free) {
-    _reply = static_cast<redisReply *>(reply);
+redis_reply::redis_reply(void *reply, const bool can_free)
+    : can_free(can_free) {
+  _reply = static_cast<redisReply *>(reply);
 }
 
 redis_reply::~redis_reply() {
-    if (_reply && can_free) {
-        freeReplyObject(_reply);
-    }
+  if (_reply && can_free) {
+    freeReplyObject(_reply);
+  }
 }
 
 std::optional<redisReply *> redis_reply::get_reply() const noexcept {
-    if (_reply) {
-        return _reply;
-    }
+  if (_reply) {
+    return _reply;
+  }
 
-    return std::nullopt;
+  return std::nullopt;
 }
 
-std::optional<int> redis_reply::get_type() const noexcept {
-    if (_reply) {
-        return _reply->type;
-    }
+int redis_reply::get_type() const {
+  if (_reply) {
+    return _reply->type;
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-std::optional<long long> redis_reply::get_integer() const noexcept {
-    if (_reply) {
-        return _reply->integer;
-    }
+long long redis_reply::get_integer() const {
+  if (_reply) {
+    return _reply->integer;
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-std::optional<double> redis_reply::get_dval() const noexcept {
-    if (_reply) {
-        return _reply->dval;
-    }
+double redis_reply::get_dval() const {
+  if (_reply) {
+    return _reply->dval;
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-std::optional<size_t> redis_reply::get_len() const noexcept {
-    if (_reply) {
-        return _reply->len;
-    }
+size_t redis_reply::get_len() const {
+  if (_reply) {
+    return _reply->len;
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-std::optional<std::string> redis_reply::get_str() const noexcept {
-    if (_reply) {
-        return _reply->str;
-    }
+std::string redis_reply::get_str() const {
+  if (_reply) {
+    return std::string {_reply->str, _reply->len};
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-std::optional<std::array<char, 4>> redis_reply::get_vtype() const noexcept {
-    if (_reply) {
-        std::array<char, 4> result {};
-        std::copy_n(_reply->vtype, 4, result.begin());
-        return result;
-    }
+std::array<char, 4> redis_reply::get_vtype() const {
+  if (_reply) {
+    std::array<char, 4> result{};
+    std::copy_n(_reply->vtype, 4, result.begin());
+    return result;
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-std::optional<redis_array> redis_reply::get_array() const noexcept {
-    if (_reply) {
-        return redis_array {_reply->element, _reply->elements};
-    }
+redis_array redis_reply::get_array() const {
+  if (_reply) {
+    return redis_array{_reply->element, _reply->elements};
+  }
 
-    return std::nullopt;
+  throw empty_reply_error();
 }
 
-bool redis_reply::has_value() const noexcept {
-    return _reply != nullptr;
-}
+bool redis_reply::has_value() const noexcept { return _reply; }

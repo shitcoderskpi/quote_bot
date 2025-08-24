@@ -7,23 +7,21 @@
 #include "cppcoro/static_thread_pool.hpp"
 #include "cppcoro/sync_wait.hpp"
 
-///### REDIS QUEUE TESTS ###
+/// ### REDIS QUEUE TESTS ###
 ///
 ///!!! TO RUN TESTS YOU NEED FIRST START REDIS (VALKEY) SERVER !!!
 ///
-cppcoro::static_thread_pool thread_pool {4};
-redis_queue q {"localhost", 6379, thread_pool};
+cppcoro::static_thread_pool thread_pool{4};
+redis_queue q{"localhost", 6379, thread_pool};
 
 TEST(redis_queue, enqueue_test) {
-    EXPECT_NO_THROW(
-        cppcoro::sync_wait(q.enqueue("test", "Test data"))
-        );
+    EXPECT_NO_THROW(cppcoro::sync_wait(q.enqueue("test", "Test data")));
 
     const auto reply = cppcoro::sync_wait(q.dequeue("test", 1));
 
     EXPECT_EQ(reply.has_value(), true);
 
-    EXPECT_EQ(strcmp(reply.get_array().value()[1].get_str().value().c_str(), "Test data"), 0);
+    EXPECT_EQ(strcmp(reply.get_array()[1].get_str().c_str(), "Test data"), 0);
 }
 
 TEST(redis_array, iterator_test) {
@@ -33,14 +31,14 @@ TEST(redis_array, iterator_test) {
 
     EXPECT_EQ(reply.has_value(), true);
 
-    EXPECT_EQ(reply.get_array().value().size(), 2);
-    EXPECT_NO_FATAL_FAILURE(reply.get_array().value().begin());
-    EXPECT_NO_FATAL_FAILURE(reply.get_array().value().end());
+    EXPECT_EQ(reply.get_array().size(), 2);
+    // ReSharper disable once CppNoDiscardExpression
+    EXPECT_NO_FATAL_FAILURE(reply.get_array().begin());
+    // ReSharper disable once CppNoDiscardExpression
+    EXPECT_NO_FATAL_FAILURE(reply.get_array().end());
 }
 
-TEST(redis_queue, delete_test) {
-    EXPECT_NO_THROW(cppcoro::sync_wait(q.delete_queue("test")));
-}
+TEST(redis_queue, delete_test) { EXPECT_NO_THROW(cppcoro::sync_wait(q.delete_queue("test"))); }
 
 // TEST(redis_queue, enqueue_stress_test) {
 //     constexpr size_t N = 1'000;
