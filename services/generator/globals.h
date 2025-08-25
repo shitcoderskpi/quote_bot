@@ -6,29 +6,31 @@
 #define GLOBALS_H
 #include <Magick++/Blob.h>
 #include <Magick++/Image.h>
-#include <filesystem>
-#include <immintrin.h>
 #include <memory>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-inline long long get_count_of_files_in_directory(const std::filesystem::path &dir) {
-    if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir)) {
-        return -1;
-    }
+#ifndef DEBUG_COLORS
+#define DEBUG_COLORS true
+#endif
 
-    try {
-        std::filesystem::directory_iterator it;
-        return std::count_if(
-                std::filesystem::begin(it), std::filesystem::end(it),
-                [](const std::filesystem::directory_entry &entry) { return std::filesystem::is_regular_file(entry); });
-    } catch (const std::filesystem::filesystem_error &e) {
-        spdlog::error("Filesystem error: {}", e.what());
-        return -1;
-    }
-}
+#ifndef TRIM
+#define TRIM false
+#endif
+
+#ifndef NO_TRIM_OFFSET_FORMULA
+#define NO_TRIM_OFFSET_FORMULA (-ascent)
+#endif
+
+#ifndef OFFSET_FORMULA
+#define OFFSET_FORMULA (-std::round(ascent - (ascent + descent) / 2.0 + descent * 0.5))
+#endif
+
+#ifndef WIDTH_PADDING
+#define WIDTH_PADDING 1
+#endif
 
 constexpr std::string_view colorspace_type_to_string(const Magick::ColorspaceType &cs) {
     switch (cs) {

@@ -15,7 +15,7 @@
 class redis_queue final {
 public:
     redis_queue(const std::string_view &host, int port, cppcoro::static_thread_pool &pool) noexcept;
-    ~redis_queue();
+    ~redis_queue() noexcept = default;
 
     template<typename StringT>
     cppcoro::task<redis_reply> enqueue(const std::string_view &queue_name, StringT data) const;
@@ -29,7 +29,7 @@ public:
     cppcoro::task<> delete_queue(const std::string_view &queue_name) const;
 
 private:
-    std::shared_ptr<redisContext> c;
+    std::unique_ptr<redisContext, decltype(&redisFree)> c;
     std::shared_ptr<spdlog::logger> _logger;
     cppcoro::static_thread_pool &_pool;
 };

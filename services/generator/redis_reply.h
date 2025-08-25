@@ -38,7 +38,7 @@ public:
   redis_reply &operator=(const redis_reply &) = delete;
 
   redis_reply(redis_reply &&other) noexcept
-      : _reply(other._reply), can_free(true) {
+      : _reply(other._reply), can_free(other.can_free) {
     other._reply = nullptr;
   }
 

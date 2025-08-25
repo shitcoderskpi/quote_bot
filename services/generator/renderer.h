@@ -14,13 +14,6 @@
 #include "image.h"
 #include "rasterizer.h"
 
-
-template<typename T>
-T clamp(const T &min, const T &value, const T &max) {
-    return std::max(min, std::min(value, max));
-}
-
-
 class renderer {
 public:
     renderer() noexcept;
@@ -133,13 +126,15 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
 #ifndef DEBUG
         const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale);
 #else
-        const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale, true);
+        const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale, DEBUG_COLORS);
 #endif
 
         Magick::Image text;
         text.density(density);
-        text.read(result.width, result.height, "BGRA", Magick::CharPixel, result.data);
+        text.read(result.width, result.height, "BGRA", Magick::CharPixel, result.data.data());
+#if TRIM
         text.trim();
+#endif
 
         render_results[i] = std::make_pair(text, calculate_offsets(text, bg, img.text_entries.at(i), result, scale));
     }
@@ -154,14 +149,14 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
 inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text, const pango::raster_text& r_text,
     const Magick::Point &scale) {
 
-    const double x_offset = clamp(
-        0.0,
+    const double x_offset = std::clamp(
         text.x * scale.x() + alignment_to_offset(text.alignment, static_cast<long>(t_img.columns())),
+        0.0,
         static_cast<double>(bg.columns())
         );
-    const double y_offset = clamp(
-        0.0,
+    const double y_offset = std::clamp(
         text.y * scale.y() + calculate_baseline(r_text, scale),
+        0.0,
         static_cast<double>(bg.rows())
         );
 
@@ -171,8 +166,11 @@ inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, con
 inline double renderer::calculate_baseline(const pango::raster_text &raster, const Magick::Point &scale) {
     const double ascent  = raster.metrics.ascent_px()  * scale.y();
     const double descent = raster.metrics.descent_px() * scale.y();
-
-    return -std::round(ascent - (ascent + descent) / 2.0 + descent * 0.5);
+#if TRIM
+    return OFFSET_FORMULA;
+#else
+    return NO_TRIM_OFFSET_FORMULA;
+#endif
 }
 
 inline long renderer::alignment_to_offset(const PangoAlignment &alignment, const long &text_width) {

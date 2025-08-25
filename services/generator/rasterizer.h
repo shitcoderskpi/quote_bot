@@ -18,12 +18,12 @@ namespace pango {
         explicit font_metrics(PangoFontMetrics *metrics) noexcept : metrics(metrics) {}
         ~font_metrics() noexcept;
 
-        [[nodiscard]] int ascent() const noexcept;
-        [[nodiscard]] int descent() const noexcept;
-        [[nodiscard]] int height() const noexcept;
-        [[nodiscard]] int ascent_px() const noexcept;
-        [[nodiscard]] int descent_px() const noexcept;
-        [[nodiscard]] int height_px() const noexcept;
+        [[nodiscard]] constexpr int ascent() const noexcept { return metrics->ascent; }
+        [[nodiscard]] constexpr int descent() const noexcept { return metrics->descent; }
+        [[nodiscard]] constexpr int height() const noexcept { return metrics->height; }
+        [[nodiscard]] constexpr int ascent_px() const noexcept { return metrics->ascent / PANGO_SCALE; }
+        [[nodiscard]] constexpr int descent_px() const noexcept { return metrics->descent / PANGO_SCALE; }
+        [[nodiscard]] constexpr int height_px() const noexcept { return metrics->height / PANGO_SCALE; }
 
     private:
         PangoFontMetrics *metrics;
@@ -33,24 +33,24 @@ namespace pango {
         int width;
         int height;
         cairo_surface_t *surface;
-        unsigned char *data;
-        unsigned long stride;
+        std::span<unsigned char> data;
         font_metrics metrics;
 
-        raster_text(int width, int height, cairo_surface_t *surface, PangoFontMetrics *metrics, unsigned char *data,
-                    int stride) noexcept;
-
+        raster_text(int width, int height, cairo_surface_t *surface, PangoFontMetrics *metrics,
+                    unsigned char *data) noexcept;
         ~raster_text() noexcept;
     };
 
     class rasterizer {
     public:
-        rasterizer() noexcept;
-        ~rasterizer() noexcept;
+        rasterizer() noexcept = default;
+        ~rasterizer() noexcept = default;
 
-        static raster_text raster(const text &, const Magick::Point &, bool debug_paint = false);
-
-        static Magick::Point calculate_size(const text &, const Magick::Point &);
+#ifdef DEBUG
+        static raster_text raster(const text &, const Magick::Point &, bool debug_paint);
+#else
+        static raster_text raster(const text &, const Magick::Point &);
+#endif
 
     private:
         std::shared_ptr<spdlog::logger> logger;

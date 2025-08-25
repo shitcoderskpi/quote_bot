@@ -98,6 +98,7 @@
                 result.alpha(true);
 
                 result.magick("WEBP");
+                result.defineValue("webp", "lossless", "true");
 
                 logger->debug("Image dimensions: x={}|y={}", result.columns(), result.rows());
                 logger->debug("Using {} bits per channel, color space: {}, alpha channel: {}", result.depth(),
@@ -120,7 +121,7 @@
                 cppcoro::sync_wait(queue.enqueue("generate:results", compressed));
             } catch (const simdjson::simdjson_error &e){
                 logger->error("JSON parsing error: {}", e.what());
-            } catch (const std::runtime_error &e) {
+            } catch (const std::exception &e) {
                 logger->error(e.what());
             }
         } else {

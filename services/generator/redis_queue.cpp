@@ -6,9 +6,8 @@
 #include "globals.h"
 #include "cppcoro/schedule_on.hpp"
 
-redis_queue::redis_queue(const std::string_view &host, const int port, cppcoro::static_thread_pool& pool) noexcept : _pool {pool} {
+redis_queue::redis_queue(const std::string_view &host, const int port, cppcoro::static_thread_pool& pool) noexcept : c{redisConnect(host.data(), port), &redisFree}, _pool{pool} {
     _logger = logger_init("redis_queue");
-    c = std::shared_ptr<redisContext> {redisConnect(host.data(), port)};
     if (c == nullptr || c->err) {
         if (c) {
             _logger->error("Failed to connect to redis server: {}", c->errstr);
@@ -18,10 +17,6 @@ redis_queue::redis_queue(const std::string_view &host, const int port, cppcoro::
 
         exit(1);
     }
-}
-
-redis_queue::~redis_queue() {
-    if (c) redisFree(c.get());
 }
 
 cppcoro::task<redis_reply> redis_queue::enqueue(const std::string_view &queue_name, const char *data) const {
