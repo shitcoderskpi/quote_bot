@@ -6,6 +6,7 @@ services:
       - monitoring
 
   prometheus:
+    container_name: prometheus
     image: prom/prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
@@ -63,5 +64,18 @@ services:
       - REDIS_HOST
     volumes:
       - ./core:/core
+
+  template_engine:
+    container_name: template_engine
+    networks:
+      - monitoring
+    build:
+      context: ../services/template_engine/
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST
+
 networks:
   monitoring:
