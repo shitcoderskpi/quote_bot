@@ -78,6 +78,7 @@ services:
       - REDIS_HOST
     volumes:
       - ../services/logs:/app/logs
+      - ../services/template_engine:/app
     develop:
       watch:
         - action: sync
