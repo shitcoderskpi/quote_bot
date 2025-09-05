@@ -27,7 +27,7 @@ COPY . .
 RUN sed -i 's/ftruncate64/ftruncate/g' /app/extern/cppcoro/lib/writable_file.cpp
 
 RUN mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/usr/lib .. &&\
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib .. &&\
     cmake --build . -j$(nproc) && \
     strip --strip-unneeded generator
 

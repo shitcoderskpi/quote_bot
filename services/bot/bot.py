@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
-from json import dumps
+from json import dumps, loads
 from logging import WARNING, getLogger
 from re import compile
 from aiogram import F, Bot, Dispatcher, html
@@ -93,9 +93,10 @@ async def command_quote_handler(message: Message) -> None:
     img = await redis.dequeue("generate:results")
 
     img_decompressed = decompressor.decompress(img[1])
-    img_decoded = b64decode(img_decompressed)
+    img_decoded = loads(img_decompressed)
+    img_b64 = b64decode(img_decoded.get("image"))
 
-    await bot.send_sticker(reply.chat.id, BufferedInputFile(img_decoded, "quote.webp"))
+    await bot.send_sticker(img_decoded.get("chat_id"), BufferedInputFile(img_b64, "quote.webp"))
 
 
 async def bot_() -> None:
