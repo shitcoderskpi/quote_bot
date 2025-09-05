@@ -7,3 +7,6 @@
 [submodule "services/generator/services/generator/extern/prometheus-cpp"]
 	path = services/generator/services/generator/extern/prometheus-cpp
 	url = https://github.com/jupp0r/prometheus-cpp.git
+[submodule "services/template_engine"]
+	path = services/template_engine
+	url = https://github.com/shitcoderskpi/template_engine
