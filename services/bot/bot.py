@@ -13,6 +13,8 @@ from base64 import b64encode, b64decode
 from prometheus_client import Summary
 from config import LOG_LVL, TOKEN, logger_init, REDIS_HOST, env_check, LOG_FILE
 from redis_controller import RedisQueue
+from zstandard import ZstdCompressor
+from zstandard import ZstdDecompressor
 
 logger = getLogger("bot")
 logger.setLevel(LOG_LVL)
@@ -27,6 +29,9 @@ dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 redis = RedisQueue(REDIS_HOST)
 
+compressor = ZstdCompressor(9)
+decompressor = ZstdDecompressor()
+
 REQUEST_TIME = Summary("request_processing_time", "Time spent processing requests")
 
 @dataclass
@@ -37,13 +42,15 @@ class SerializableMessage:
     image: BytesIO
     chat_id: int
 
+
     def to_json(self):
+        self.image.seek(0)
         return dumps({
             "chat-id": self.chat_id,
             "username": self.username,
             "user_status": self.user_status,
             "content": self.content,
-            "image": b64encode(self.image.read()).decode("utf-8")
+            "image": b64encode(self.image.read()).decode("UTF-8")
             }, ensure_ascii=False).encode("utf-8")
 
 
@@ -82,12 +89,13 @@ async def command_quote_handler(message: Message) -> None:
         logger.warning(f"User {reply.from_user.id} does not have any photos.")
 
     msg = SerializableMessage(reply.from_user.full_name, get_member_custom_title(member), reply.text, avatar, reply.chat.id)
-    await redis.enqueue("generate:jobs", msg.to_json())
+    await redis.enqueue("generate:messages", compressor.compress(msg.to_json()))
     img = await redis.dequeue("generate:results")
 
-    decoded = b64decode(img[1])
+    img_decompressed = decompressor.decompress(img[1])
+    img_decoded = b64decode(img_decompressed)
 
-    await bot.send_sticker(reply.chat.id, BufferedInputFile(decoded, "quote.webp"))
+    await bot.send_sticker(reply.chat.id, BufferedInputFile(img_decoded, "quote.webp"))
 
 
 async def bot_() -> None:

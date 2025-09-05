@@ -76,6 +76,20 @@ services:
       - redis
     environment:
       - REDIS_HOST
+    develop:
+      watch:
+        - action: sync
+          path: ../services/template_engine/
+          target: /app
+          ignore:
+            # Ignores everything but python files
+            - "!**/*.py"
+
+        - action: rebuild
+          path: Dockerfile
+
+        - action: restart
+          path: ../services/template_engine/
 
 networks:
   monitoring:
