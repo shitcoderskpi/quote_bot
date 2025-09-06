@@ -23,4 +23,5 @@ if (conn->client.sock != INVALID_SOCKET) {\
 }' services/generator/extern/prometheus-cpp/3rdparty/civetweb/src/civetweb.c
 ````
 
-[!NOTE] This fix modifies a submodule, so it cannot be pushed directly.
+> [!NOTE]
+> This fix modifies a submodule, so it cannot be pushed directly.
