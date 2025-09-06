@@ -49,6 +49,10 @@ namespace pango {
         PangoLayout *layout = pango_cairo_create_layout(dummy_cr);
         const auto markup = to_string(t);
         pango_layout_set_markup(layout, markup.c_str(), markup.length());
+        if (t.wrap_width > 0) {
+            pango_layout_set_width(layout, t.wrap_width * scale.x());
+            pango_layout_set_wrap(layout, t.wrap_mode);
+        }
 
         PangoFontDescription *font = pango_font_description_from_string(t.font_description().c_str());
         pango_layout_set_font_description(layout, font);

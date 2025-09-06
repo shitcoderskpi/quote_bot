@@ -7,12 +7,20 @@
 #include "globals.h"
 
 namespace pango {
+    PangoWrapMode text_factory::str_to_pango_wrap_mode(const pugi::char_t *str) {
+        if (strcmp(str, "word") == 0) return PANGO_WRAP_WORD;
+        if (strcmp(str, "word-char") == 0) return PANGO_WRAP_WORD_CHAR;
+        return PANGO_WRAP_NONE;
+    }
+
     text text_factory::from_node(const pugi::xml_node &node, const std::string &fallback_font) {
         text text;
         text.x = node.attribute("x").as_int();
         text.y = node.attribute("y").as_int();
         text.font_family = get_font_family(node.attribute("font-family"), fallback_font);
         text.size = node.attribute("font-size").as_string();
+        text.wrap_width = node.attribute("wrap-width").as_int();
+        text.wrap_mode = str_to_pango_wrap_mode(node.attribute("wrap-mode").as_string());
         text.weight = font_weight_to_pango(node.attribute("font-weight"));
         text.alignment = anchor_to_alignment(node.attribute("text-anchor").as_string());
         text.color = trim(node.attribute("fill").as_string());

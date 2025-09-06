@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <string>
 
-#include <Magick++.h>
 #include "Magick++/Image.h"
 #include "preprocessor.h"
 #include "redis_queue.h"

@@ -38,6 +38,7 @@ namespace pango {
         PangoAlignment alignment;
         std::string color;
         int wrap_width = 0;
+        PangoWrapMode wrap_mode = PANGO_WRAP_WORD;
 
         [[nodiscard]] std::string font_description() const {
             std::stringstream ss;
