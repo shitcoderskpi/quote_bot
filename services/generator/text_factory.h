@@ -14,7 +14,7 @@ namespace pango {
     class text_factory {
     public:
 
-        static PangoWrapMode str_to_pango_wrap_mode(const pugi::char_t *str);
+        static PangoWrapMode str_to_pango_wrap_mode(const std::string & str);
 
         static text from_node(const pugi::xml_node &node, const std::string &fallback_font);
 
