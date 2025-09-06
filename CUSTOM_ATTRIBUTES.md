@@ -10,4 +10,4 @@
   - `none` — No wrapping.
   - `word` — Wrap by word (default).
   - `word-char` — Wrap by word, but if a word is too long, wrap by character.
-- **Description** Sets wrap mode.
+- **Description:** Sets wrap mode.
