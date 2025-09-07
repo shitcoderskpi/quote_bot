@@ -50,7 +50,7 @@ namespace pango {
         const auto markup = to_string(t);
         pango_layout_set_markup(layout, markup.c_str(), markup.length());
         if (t.wrap_width > 0) {
-            pango_layout_set_width(layout, t.wrap_width * scale.x());
+            pango_layout_set_width(layout, t.wrap_width * PANGO_SCALE);
             pango_layout_set_wrap(layout, t.wrap_mode);
         }
 
@@ -62,14 +62,14 @@ namespace pango {
 
         int width, height;
         pango_layout_get_pixel_size(layout, &width, &height);
-        const int surf_width = static_cast<double>(width) * scale.x() + WIDTH_PADDING;
-        const int surf_height = static_cast<double>(height) * scale.y();
+        const int surf_width = std::ceil(width * scale.x());
+        const int surf_height = std::ceil(height * scale.y());
 
         pango_font_description_free(font);
         cairo_surface_destroy(dummy);
         cairo_destroy(dummy_cr);
 
-        const auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_width, surf_height);
+        const auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_width + WIDTH_PADDING, surf_height);
         const auto cr = cairo_create(surface);
 
 #ifdef DEBUG
@@ -82,7 +82,8 @@ namespace pango {
 #endif
 
         cairo_scale(cr, scale.x(), scale.y());
-        pango_layout_set_width(layout, surf_width * PANGO_SCALE);
+
+        pango_layout_set_width(layout, width * PANGO_SCALE);
         pango_cairo_update_context(cr, pango_layout_get_context(layout));
         pango_cairo_update_layout(cr, layout);
         pango_cairo_show_layout(cr, layout);
