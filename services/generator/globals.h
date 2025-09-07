@@ -33,7 +33,7 @@
 #endif
 
 #ifndef WIDTH_PADDING
-#define WIDTH_PADDING 1
+#define WIDTH_PADDING 10
 #endif
 
 constexpr std::string_view colorspace_type_to_string(const Magick::ColorspaceType &cs) {

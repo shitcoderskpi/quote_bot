@@ -131,7 +131,7 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
 
         Magick::Image text;
         text.density(density);
-        text.read(result.width, result.height, "BGRA", Magick::CharPixel, result.data.data());
+        text.read(result.width + WIDTH_PADDING, result.height, "BGRA", Magick::CharPixel, result.data.data());
 #if TRIM
         text.trim();
 #endif
@@ -150,7 +150,7 @@ inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, con
     const Magick::Point &scale) {
 
     const double x_offset = std::clamp(
-        text.x * scale.x() + alignment_to_offset(text.alignment, static_cast<long>(t_img.columns())),
+        text.x * scale.x() + alignment_to_offset(text.alignment, r_text.width),
         0.0,
         static_cast<double>(bg.columns())
         );
