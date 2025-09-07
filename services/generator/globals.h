@@ -24,6 +24,10 @@
 #define NO_TRIM_OFFSET_FORMULA (-ascent)
 #endif
 
+#ifndef WIDTH_PADDING
+#define WIDTH_PADDING 1
+#endif
+
 #ifndef OFFSET_FORMULA
 #define OFFSET_FORMULA (-std::round(ascent - (ascent + descent) / 2.0 + descent * 0.5))
 #endif

@@ -34,20 +34,7 @@ services:
       - "8000:8000"
     volumes:
       - ../services/logs:/app/logs
-    develop:
-      watch:
-        - action: sync
-          path: ../services/bot/
-          target: /app
-          ignore:
-            # Ignores everything but python files 
-            - "!**/*.py"
 
-        - action: rebuild
-          path: Dockerfile
-
-        - action: restart
-          path: ../services/bot/
   generator:
     container_name: generator
     hostname: generator
@@ -58,15 +45,14 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - redis
-    ports:
-      - "8080:8080"
     environment:
+      - RUST_LOG=info
       - REDIS_HOST
-    volumes:
-      - ./core:/core
+    restart: unless-stopped
 
   template_engine:
     container_name: template_engine
+    hostname: template_engine
     networks:
       - monitoring
     build:
@@ -76,23 +62,26 @@ services:
       - redis
     environment:
       - REDIS_HOST
+      - LOG_LVL
+      - LOG_PATH
     volumes:
       - ../services/logs:/app/logs
-      - ../services/template_engine:/app
-    develop:
-      watch:
-        - action: sync
-          path: ../services/template_engine/
-          target: /app
-          ignore:
-            # Ignores everything but python files
-            - "!**/*.py"
-
-        - action: rebuild
-          path: Dockerfile
-
-        - action: restart
-          path: ../services/template_engine/
+      #- ../services/template_engine:/app # Workaround, updates after man restart (instead of rebuild)
+# TODO: This does not work!!! Reread docs and find out why to implement
+#    develop:
+#      watch:
+#        - action: sync
+#          path: ../services/template_engine/
+#          target: /app
+#          ignore:
+#            # Ignores everything but python files
+#            - "!**/*.py"
+#
+#        - action: rebuild
+#          path: Dockerfile
+#
+#        - action: restart
+#          path: ../services/template_engine/
 
 networks:
   monitoring:
