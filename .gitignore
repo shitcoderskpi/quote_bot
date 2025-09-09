@@ -4,3 +4,16 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 .idea/
+__pycache__/
+.cache/
+compile_commands.json
+venv/
+pyrightconfig.json
+quote_bot/
+infra/.env
+services/logs
+cmake-build*/
+*.log
+.vscode/
+.clang*
+
