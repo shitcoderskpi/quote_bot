@@ -42,7 +42,8 @@ namespace pango {
         if (t.wrap_width <= 0 || t.wrap_mode == PANGO_WRAP_NONE) {
             return PANGO_PIXELS(logical.width);
         }
-        return PANGO_PIXELS(t.wrap_width);
+        
+        return std::min(t.wrap_width, PANGO_PIXELS(logical.width));
     }
 
 #ifdef DEBUG
