@@ -60,6 +60,7 @@ namespace pango {
         static constexpr std::array<std::array<unsigned char, 4>, 6> debug_colors{
                 red, {255, 0, 0, 255}, {255, 0, 255, 0}, {255, 178, 255, 255}, {255, 255, 255, 0}, {255, 239, 191, 4}};
 #endif
+        static int calculate_width(const text &t, PangoRectangle logical);
     };
 
 } // namespace pango
