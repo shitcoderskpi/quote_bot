@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
+import time
 from json import dumps, loads
 from logging import WARNING, getLogger
 from re import compile
@@ -89,12 +90,18 @@ async def command_quote_handler(message: Message) -> None:
         logger.warning(f"User {reply.from_user.id} does not have any photos.")
 
     msg = SerializableMessage(reply.from_user.full_name, get_member_custom_title(member), reply.text, avatar, reply.chat.id)
+
+    current_ms = int(time.time() * 1000)
+
     await redis.enqueue("generate:messages", compressor.compress(msg.to_json()))
     img = await redis.dequeue("generate:results")
 
     img_decompressed = decompressor.decompress(img[1])
     img_decoded = loads(img_decompressed)
     img_b64 = b64decode(img_decoded.get("image"))
+
+    new_ms = int(time.time() * 1000)
+    logger.critical(f"Time spent: {new_ms - current_ms} ms")
 
     await bot.send_sticker(img_decoded.get("chat_id"), BufferedInputFile(img_b64, "quote.webp"))
 
