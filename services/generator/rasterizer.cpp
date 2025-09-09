@@ -56,13 +56,18 @@ namespace pango {
         cairo_t *dummy_cr = cairo_create(dummy);
 
         PangoLayout *layout = pango_cairo_create_layout(dummy_cr);
+
+        if (t.wrap_width > 0 && t.wrap_mode != PANGO_WRAP_NONE) {
+            pango_layout_set_width(layout, t.wrap_width * PANGO_SCALE);
+            pango_layout_set_wrap(layout, t.wrap_mode);
+        }
+
         const auto markup = to_string(t);
         pango_layout_set_markup(layout, markup.c_str(), markup.length());
 
         PangoFontDescription *font = pango_font_description_from_string(t.font_description().c_str());
         pango_layout_set_font_description(layout, font);
 
-        pango_layout_set_wrap(layout, t.wrap_mode);
 
         PangoContext *context = pango_layout_get_context(layout);
         PangoFontMetrics *metrics = pango_context_get_metrics(context, font, pango_context_get_language(context));
@@ -78,6 +83,7 @@ namespace pango {
         pango_font_description_free(font);
         cairo_surface_destroy(dummy);
         cairo_destroy(dummy_cr);
+
 
         const auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_width + WIDTH_PADDING, surf_height);
         const auto cr = cairo_create(surface);
