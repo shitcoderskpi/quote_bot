@@ -8,3 +8,5 @@ redis = { version = "0.25.4", features = ["tokio-comp", "aio", "r2d2"] }
 serde_json = "1.0.117"
 chrono = "0.4"
 regex = "1.11"
+unicode-segmentation = "1.12"
+image = "0.24"

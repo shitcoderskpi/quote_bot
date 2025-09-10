@@ -2,13 +2,12 @@ use redis::{Commands, RedisResult};
 use serde_json::Value;
 use std::env;
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
+use unicode_segmentation::UnicodeSegmentation;
+use image::{open, imageops};
 
 fn main() -> RedisResult<()> {
-    // Шаг 1: Подключение к Redis
-    // Сначала мы устанавливаем соединение с Redis-сервером.
     let redis_host = env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let redis_url = format!("redis://{}/", redis_host);
     let client = redis::Client::open(redis_url)?;
@@ -16,19 +15,11 @@ fn main() -> RedisResult<()> {
 
     println!("Listening for jobs on 'generate:jobs' queue...");
 
-    // Шаг 2: Запуск основного цикла обработки заданий
-    // Программа будет постоянно ждать новых заданий в очереди.
     loop {
-        // Шаг 3: Получение задания из очереди (блокирующий вызов)
-        // Команда BLPOP блокирует соединение, пока не появится новое задание.
         let (_queue, job_data): (String, String) = con.blpop("generate:jobs", 0.0)?;
-
-        // Запускаем таймер сразу после получения задачи.
         let start_time = Instant::now();
         println!("Received job: {}", job_data);
 
-        // Шаг 4: Парсинг JSON-данных
-        // Проверяем, что полученные данные имеют правильный формат.
         let json_value: Value = match serde_json::from_str(&job_data) {
             Ok(v) => v,
             Err(e) => {
@@ -36,10 +27,9 @@ fn main() -> RedisResult<()> {
                 continue;
             }
         };
-        println!("Processing job received from queue...");
 
-        // Шаг 5: Извлечение SVG-шаблона
-        let svg_template: String = match json_value.get("template") {
+        // Берем template как SVG
+        let svg_template = match json_value.get("template") {
             Some(Value::String(s)) => s.clone(),
             _ => {
                 eprintln!("Missing 'template' key in JSON");
@@ -47,49 +37,114 @@ fn main() -> RedisResult<()> {
             }
         };
 
-        // Шаг 6: Подготовка и замена данных в SVG
-        // Создаем папку для сохранения готового изображения и заменяем эмодзи.
         let output_dir = "./images";
-        if let Err(e) = fs::create_dir_all(output_dir) {
-            eprintln!("Failed to create output dir: {}", e);
-            continue;
-        }
-
+        fs::create_dir_all(output_dir).ok();
+        let tmp_svg_path = format!("{}/temp.svg", output_dir);
+        let base_png = format!("{}/base.png", output_dir);
         let output_file = format!("{}/output.png", output_dir);
 
-        // Заменяем эмодзи на локальные изображения.
-        let svg_final = svg_template
-            .replace("😀", r#"<image href="./twemoji_png/1f424.png" width="20" height="20"/>"#)
-            .replace("🎉", r#"<image href="./twemoji_png/1f424.png" width="20" height="20"/>"#)
-            .replace("❤️", r#"<image href="./twemoji_png/1f424.png" width="20" height="20"/>"#)
-            .replace("🔥", r#"<image href="./twemoji_png/1f424.png" width="20" height="20"/>"#);
+        // Получаем font_size и начальное смещение X из JSON (по желанию)
+        let font_size = json_value.get("font_size").and_then(|v| v.as_i64()).unwrap_or(15) as u32;
+        let start_x = json_value.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
 
-        // Шаг 7: Сохранение временного SVG-файла
-        let tmp_svg_path = format!("{}/temp.svg", output_dir);
-        if let Err(e) = fs::write(&tmp_svg_path, svg_final) {
+        // 1) Обрабатываем SVG: заменяем эмодзи на пробелы и запоминаем позиции
+        let mut emoji_positions = vec![];
+        let mut processed_template = String::new();
+        let mut offset_x = start_x;
+
+        for g in svg_template.graphemes(true) {
+            let c = g.chars().next().unwrap();
+            if is_emoji(c) {
+                let codepoint = get_emoji_codepoint(g);
+                let path = format!("./twemoji/{}.png", codepoint);
+                if fs::metadata(&path).is_ok() {
+                    emoji_positions.push((path, offset_x, 0, font_size));
+                    processed_template.push(' '); // заменяем эмодзи на пробел
+                } else {
+                    processed_template.push_str(g);
+                }
+            } else {
+                processed_template.push_str(g);
+            }
+            offset_x += (font_size as f32 * 0.6) as i32; // горизонтальный отступ
+        }
+
+        // Сохраняем обработанный SVG
+        if let Err(e) = fs::write(&tmp_svg_path, &processed_template) {
             eprintln!("Failed to write temporary SVG: {}", e);
             continue;
         }
 
-        // Конвертируем временный SVG-файл в PNG с помощью rsvg-convert.
+        // 2) Конвертируем SVG в PNG
         let status = Command::new("rsvg-convert")
             .arg(&tmp_svg_path)
             .arg("-o")
-            .arg(&output_file)
+            .arg(&base_png)
+            .arg("--dpi-x")
+            .arg("96")
+            .arg("--dpi-y")
+            .arg("96")
             .status();
 
-        // Шаг 8: Обработка результата и очистка
-        match status {
-            Ok(s) if s.success() => {
-                // Измеряем общее время выполнения.
-                let duration = start_time.elapsed();
-                // Выводим результат и время в лог.
-                println!("Job done! Saved to {} in {:?}", output_file, duration);
-                // Удаляем временный файл.
+        if let Ok(s) = status {
+            if !s.success() {
+                eprintln!("rsvg-convert failed with code: {}", s);
                 let _ = fs::remove_file(&tmp_svg_path);
+                continue;
             }
-            Ok(s) => eprintln!("rsvg-convert failed with code: {}", s),
-            Err(e) => eprintln!("Failed to execute rsvg-convert: {}", e),
+        } else {
+            eprintln!("Failed to execute rsvg-convert");
+            let _ = fs::remove_file(&tmp_svg_path);
+            continue;
+        }
+
+        // 3) Накладываем эмодзи на их позиции
+        if let Err(e) = overlay_emojis(&base_png, &output_file, &emoji_positions) {
+            eprintln!("Failed to overlay emojis: {}", e);
+        }
+
+        // Удаляем временные файлы
+        let _ = fs::remove_file(&tmp_svg_path);
+        let _ = fs::remove_file(&base_png);
+
+        let duration = start_time.elapsed();
+        println!("Job done! Saved to {} in {:?}", output_file, duration);
+    }
+}
+
+/// Проверка символа на эмодзи
+fn is_emoji(c: char) -> bool {
+    match c {
+        '\u{1F600}'..='\u{1F64F}' |
+        '\u{1F300}'..='\u{1F5FF}' |
+        '\u{1F680}'..='\u{1F6FF}' |
+        '\u{1F1E0}'..='\u{1F1FF}' |
+        '\u{2600}'..='\u{26FF}' |
+        '\u{2700}'..='\u{27BF}' |
+        '\u{1F900}'..='\u{1F9FF}' |
+        '\u{1FA70}'..='\u{1FAFF}' => true,
+        _ => false,
+    }
+}
+
+/// Codepoint для Twemoji
+fn get_emoji_codepoint(grapheme: &str) -> String {
+    grapheme.chars().map(|ch| format!("{:x}", ch as u32)).collect::<Vec<_>>().join("-")
+}
+
+/// Накладывает PNG эмодзи на базовое изображение
+fn overlay_emojis(
+    base_png_path: &str,
+    output_png_path: &str,
+    emojis: &[(String, i32, i32, u32)]
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut img = open(base_png_path)?;
+    for (png_path, x, y, size) in emojis {
+        if let Ok(emoji_img) = open(png_path) {
+            let resized = emoji_img.resize_exact(*size, *size, image::imageops::FilterType::Lanczos3);
+            imageops::overlay(&mut img, &resized, *x as i64, *y as i64);
         }
     }
+    img.save(output_png_path)?;
+    Ok(())
 }

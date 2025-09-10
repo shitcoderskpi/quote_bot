@@ -17,13 +17,17 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-# Копируем локальный PNG эмодзи
-COPY 1f424.png ./twemoji_png/1f424.png
+# Копируем локальный PNG эмодзи (всю папку)
+COPY 72x72 ./twemoji
 
-# Устанавливаем Rust и собираем проект
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y && \
-    export PATH="$HOME/.cargo/bin:$PATH" && \
-    cargo build --release
+# Устанавливаем Rust
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+
+# Добавляем Rust в PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Сборка проекта
+RUN cargo build --release
 
 # Команда запуска
-CMD ["./target/release/svg-to-png-converter"]
+CMD ["/app/target/release/svg-to-png-converter"]
