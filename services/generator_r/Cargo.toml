@@ -1,0 +1,10 @@
+[package]
+name = "svg-to-png-converter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+redis = { version = "0.25.4", features = ["tokio-comp", "aio", "r2d2"] }
+serde_json = "1.0.117"
+chrono = "0.4"
+regex = "1.11"
