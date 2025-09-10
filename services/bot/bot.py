@@ -93,7 +93,7 @@ async def command_quote_handler(message: Message) -> None:
 
     current_ms = int(time.time() * 1000)
 
-    await redis.enqueue("generate:messages", compressor.compress(msg.to_json()))
+    await redis.enqueue("generate:messages", compressor.compress(msg.to_json())) #
     img = await redis.dequeue("generate:results")
 
     img_decompressed = decompressor.decompress(img[1])

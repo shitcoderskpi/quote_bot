@@ -41,13 +41,15 @@ services:
     networks:
       - monitoring
     build:
-      context: ../services/generator/
+      context: ../services/generator_r/
       dockerfile: Dockerfile
     depends_on:
       - redis
     environment:
       - RUST_LOG=info
-      - REDIS_HOST
+      - REDIS_HOST=redis
+    volumes:
+      - ../services/generator_r/:/app/images
     restart: unless-stopped
 
   template_engine:

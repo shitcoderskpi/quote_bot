@@ -19,7 +19,7 @@
     clip-path="url(#circle-clip)"
   />
 
-  <g filter="url(#shadow)">
+
     <rect
       x="47" y="1"
       width="260"
@@ -29,10 +29,10 @@
       stroke="#ccc"
       stroke-width="1"
     />
-  </g>
+
 
   <text x="56" y="23" font-size="15px" font-weight="bold" fill="#2a5885">{{ username }}</text>
   <text x="300" y="23" font-size="13px" fill="#888" text-anchor="end">{{ user_status }}</text>
 
-  <text x="56" y="46" wrap-width="{{ wrap_width }}" font-size="15px" fill="#000">{{ content }}</text>
+  <text x="56" y="46"  font-size="15px" fill="#000">{{ content }}</text>
 </svg>
