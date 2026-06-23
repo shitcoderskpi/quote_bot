@@ -4,17 +4,6 @@ services:
     image: redis:7
     networks:
       - monitoring
-
-  prometheus:
-    container_name: prometheus
-    image: prom/prometheus
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    networks:
-      - monitoring
-
   bot:
     container_name: telegram-bot
     hostname: telegram-bot

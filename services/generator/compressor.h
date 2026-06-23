@@ -15,6 +15,7 @@ public:
 
     static std::string compress(const std::string &, int);
     static std::string decompress(const std::string &);
+    static std::string decompress(std::string_view input);
 
     static size_t estimate_compressed_size(const std::string &);
 
@@ -38,7 +39,7 @@ inline std::string compressor::compress(const std::string &input, const int comp
     return compressed;
 }
 
-inline std::string compressor::decompress(const std::string &input) {
+inline std::string compressor::decompress(const std::string_view input) {
     std::string decompressed;
 
     size_t const compressed_size = ZSTD_getFrameContentSize(input.data(), input.size());

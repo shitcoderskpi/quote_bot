@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.31)
 project(generator)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -mavx2 -O3 -march=native")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS} -O2 -g -Wall")
@@ -13,6 +12,7 @@ find_package(PkgConfig REQUIRED)
 find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
 find_package(OpenMP REQUIRED)
+pkg_check_modules(LIBUV REQUIRED IMPORTED_TARGET libuv)
 pkg_check_modules(ZSTD REQUIRED libzstd)
 
 pkg_check_modules(HIREDIS REQUIRED hiredis)
@@ -36,12 +36,8 @@ add_library(core
         redis_queue.h
         redis_reply.cpp
         redis_reply.h
-        image.cpp
-        image.h
-        text.cpp
-        text.h
-        text_factory.cpp
-        text_factory.h
+        parser.cpp
+        parser.h
         renderer.cpp
         renderer.h
         rasterizer.cpp
@@ -50,14 +46,16 @@ add_library(core
         response.h
         compressor.cpp
         compressor.h
-        exceptions.h
 )
-target_compile_definitions(core PRIVATE MAGICKCORE_HDRI_ENABLE=1)
-target_include_directories(core PRIVATE ${HIREDIS_INCLUDE_DIRS})
-target_include_directories(core PRIVATE ${ZSTD_INCLUDE_DIRS})
-target_include_directories(core PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_compile_definitions(core PRIVATE $<$<CONFIG:Debug>:DEBUG>)
-target_include_directories(core PRIVATE
+target_compile_definitions(core PRIVATE
+        MAGICKCORE_HDRI_ENABLE=1
+        $<$<CONFIG:Debug>:DEBUG>
+)
+target_include_directories(core PUBLIC
+        ${HIREDIS_INCLUDE_DIRS}
+        ${LIBUV_INCLUDE_DIRS}
+        ${ZSTD_INCLUDE_DIRS}
+        ${ImageMagick_INCLUDE_DIRS}
         ${CAIRO_INCLUDE_DIRS}
         ${PANGO_INCLUDE_DIRS}
         ${PANGOCAIRO_INCLUDE_DIRS}
@@ -73,25 +71,19 @@ target_link_libraries(core
         ${PANGOCAIRO_LIBRARIES}
         OpenMP::OpenMP_CXX
         ${ZSTD_LIBRARIES}
+        PkgConfig::LIBUV
 )
 
 add_definitions(
         ${CAIRO_CFLAGS_OTHER}
         ${PANGO_CFLAGS_OTHER}
         ${PANGOCAIRO_CFLAGS_OTHER}
+        -DMAGICKCORE_HDRI_ENABLE=1
         -DMAGICKCORE_QUANTUM_DEPTH=16
 )
 
 # Executable
 add_executable(${PROJECT_NAME} main.cpp)
-target_compile_definitions(${PROJECT_NAME} PRIVATE MAGICKCORE_HDRI_ENABLE=1)
-target_include_directories(${PROJECT_NAME} PRIVATE ${HIREDIS_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE
-        ${CAIRO_INCLUDE_DIRS}
-        ${PANGO_INCLUDE_DIRS}
-        ${PANGOCAIRO_INCLUDE_DIRS}
-)
 link_directories(${PANGO_LIBRARY_DIRS})
 
 

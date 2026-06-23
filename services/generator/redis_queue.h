@@ -5,72 +5,64 @@
 #ifndef REDIS_QUEUE_H
 #define REDIS_QUEUE_H
 
+#include <hiredis/async.h>
+#include <hiredis/adapters/libuv.h>
+#include <expected>
 #include <spdlog/spdlog.h>
 
-#include "cppcoro/static_thread_pool.hpp"
-#include "cppcoro/task.hpp"
-#include "exceptions.h"
-#include "redis_reply.h"
 
 class redis_queue final {
 public:
-    redis_queue(const std::string_view &host, int port, cppcoro::static_thread_pool &pool) noexcept;
-    ~redis_queue() noexcept = default;
+    constexpr static std::expected<redis_queue, std::string> create(std::string_view host, int port, uv_loop_t *loop);
 
-    template<typename StringT>
-    cppcoro::task<redis_reply> enqueue(const std::string_view &queue_name, StringT data) const;
+    template <typename PrivData>
+    constexpr void enqueue(std::string_view queue_name, std::string &body, redisCallbackFn *callback, PrivData *data = nullptr) const noexcept;
+    template <typename PrivData>
+    constexpr void dequeue(std::string_view queue_name, size_t timeout, redisCallbackFn *callback, PrivData *data = nullptr) const noexcept;
 
-    cppcoro::task<redis_reply> enqueue(const std::string_view &queue_name, const char *data) const;
-
-    cppcoro::task<redis_reply> dequeue(const std::string_view &queue_name, size_t timeout) const;
-
-    [[nodiscard]] cppcoro::task<size_t> size(const std::string_view &queue_name) const;
-
-    cppcoro::task<> delete_queue(const std::string_view &queue_name) const;
+    template <typename PrivData>
+    constexpr static void enqueue(redisAsyncContext *ctx, std::string_view queue_name, std::string &body, redisCallbackFn *callback, PrivData *data = nullptr) noexcept;
+    template <typename PrivData>
+    constexpr static void dequeue(redisAsyncContext *ctx, std::string_view queue_name, size_t timeout, redisCallbackFn *callback, PrivData *data = nullptr) noexcept;
 
 private:
-    std::unique_ptr<redisContext, decltype(&redisFree)> c;
-    std::shared_ptr<spdlog::logger> _logger;
-    cppcoro::static_thread_pool &_pool;
+    redisAsyncContext *ctx;
+
+    explicit redis_queue(redisAsyncContext *ctx) noexcept
+    : ctx(ctx) {}
 };
 
-template<typename StringT>
-cppcoro::task<redis_reply> redis_queue::enqueue(const std::string_view &queue_name, StringT data) const {
-    co_await _pool.schedule();
-
-    if (!c)
-        throw exceptions::redis::empty_context_error{};
-
-    constexpr std::string_view operation = "LPUSH";
-    constexpr size_t operation_size = operation.size();
-    constexpr size_t argc = 3;
-
-    if constexpr (std::is_same_v<StringT, std::string>) {
-        const char *argv[] = {operation.data(), queue_name.data(), data.c_str()};
-        const size_t argvlen[] = {operation_size, queue_name.size(), data.size()};
-        redis_reply reply{redisCommandArgv(c.get(), argc, argv, argvlen)};
-        co_return reply;
-    } else if constexpr (std::is_same_v<StringT, std::string_view>) {
-        const char *argv[] = {operation.data(), queue_name.data(), data.data()};
-        const size_t argvlen[] = {operation_size, queue_name.size(), data.size()};
-        redis_reply reply{redisCommandArgv(c.get(), argc, argv, argvlen)};
-        co_return reply;
-    } else if constexpr (std::is_same_v<StringT, const char *>) {
-        const char *argv[] = {operation.data(), queue_name.data(), data};
-        const size_t argvlen[] = {operation_size, queue_name.size(),
-                                  strnlen(data, std::numeric_limits<size_t>::max() - 1)};
-        redis_reply reply{redisCommandArgv(c.get(), argc, argv, argvlen)};
-        co_return reply;
-    } else if constexpr (std::is_same_v<StringT, char *>) {
-        const char *argv[] = {operation.data(), queue_name.data(), data};
-        const size_t argvlen[] = {operation_size, queue_name.size(),
-                                  strnlen(data, std::numeric_limits<size_t>::max() - 1)};
-        redis_reply reply{redisCommandArgv(c.get(), argc, argv, argvlen)};
-        co_return reply;
+constexpr std::expected<redis_queue, std::string> redis_queue::create(const std::string_view host, const int port, uv_loop_t *loop) {
+    if (loop == nullptr) {
+        return std::unexpected {"libuv pointer is null."};
+    }
+    const auto ctx = redisAsyncConnect(host.data(), port);
+    if (ctx == nullptr || ctx->err) {
+        return std::unexpected {std::format("Failed to connect to redis server: {}", ctx->errstr == nullptr ? "Unknown error." : ctx->errstr)};
     }
 
-    throw exceptions::redis::mismatched_type_error{"Mismatched string type."};
+    redisLibuvAttach(ctx, loop);
+    return redis_queue {ctx};
 }
-
+template <typename PrivData>
+constexpr void redis_queue::enqueue(const std::string_view queue_name, std::string &body,
+                                    redisCallbackFn *callback, PrivData *data) const noexcept {
+    redisAsyncCommand(ctx, callback, data, "LPUSH %s %b", queue_name.data(), body.data(), body.size());
+}
+template <typename PrivData>
+constexpr void redis_queue::dequeue(const std::string_view queue_name, const size_t timeout,
+                                    redisCallbackFn *callback, PrivData *data) const noexcept {
+    redisAsyncCommand(ctx, callback, data, "BRPOP %s %d", queue_name.data(), timeout);
+}
+template<typename PrivData>
+constexpr void redis_queue::enqueue(redisAsyncContext *ctx, const std::string_view queue_name, std::string &body,
+                                    redisCallbackFn *callback, PrivData *data) noexcept {
+    redisAsyncCommand(ctx, callback, data, "LPUSH %s %b", queue_name.data(), body.data(), body.size());
+}
+template<typename PrivData>
+constexpr void redis_queue::dequeue(redisAsyncContext *ctx, const std::string_view queue_name, const size_t timeout,
+                                    redisCallbackFn *callback, PrivData *data) noexcept {
+    redisAsyncCommand(ctx, callback, data, "BRPOP %s %d", queue_name.data(), timeout);
+}
 
 #endif // REDIS_QUEUE_H

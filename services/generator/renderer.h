@@ -11,20 +11,18 @@
 #include <spdlog/logger.h>
 
 #include "globals.h"
-#include "image.h"
+#include "parser.h"
 #include "rasterizer.h"
 
 class renderer {
 public:
     renderer() noexcept;
-    ~renderer() noexcept = default;
 
-    [[nodiscard]] Magick::Image render_image(const templates::image &img, const Magick::Point &density) const;
+    [[nodiscard]] Magick::Image render_image(const parsed_message &msg, const Magick::Point &density) const;
 
 private:
-    std::shared_ptr<spdlog::logger> logger;
 
-    static Magick::Point calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text, const pango::raster_text &r_text, const
+    static Magick::Point calculate_offsets(const Magick::Image &bg, const pango_message &text, const pango::raster_text &r_text, const
                                            Magick::Point &scale);
 
     static double calculate_baseline(const pango::raster_text &raster, const Magick::Point &scale);
@@ -34,20 +32,19 @@ private:
 
 inline renderer::renderer() noexcept {
     Magick::InitializeMagick(nullptr);
-    logger = logger_init("renderer");
 }
 
-inline Magick::Image renderer::render_image(const templates::image &img, const Magick::Point &density = Magick::Point(300, 300)) const {
+inline Magick::Image renderer::render_image(const parsed_message &msg, const Magick::Point &density = Magick::Point(300, 300)) const {
     Magick::Image bg;
     bg.backgroundColor(Magick::Color("transparent"));
     bg.density(density);
-    bg.read(Magick::Blob {img.background.data(), img.background.size()});
+    bg.read(Magick::Blob {msg.svg.svg_data.data(), msg.svg.svg_data.size()});
 
     const Magick::Point scale {density.x() / 96, density.y() / 96};
 
-    logger->debug("Img scale: x={}|y={}", scale.x(), scale.y());
+    spdlog::debug("Img scale: x={}|y={}", scale.x(), scale.y());
 
-    const size_t img_texts_size = img.text_entries.size();
+    const size_t img_texts_size = msg.pangos.size();
     std::vector<std::pair<Magick::Image, Magick::Point>> render_results {img_texts_size};
 
     // Fancy parallel rendering
@@ -121,12 +118,12 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
 ⣿⣿⣿⣿⣿⣿⡟⢶⠚⡄⠂⠈⡀⠈⠐⠀⠀⠀⠀⠀⠀⣽⣻⣞⣭⣯⣷⣌⡯⢥⢞⡣⢒⡄⢋⠤⡉⠒⢡⠘⠠⠐⡀⠒⠠⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⢤⡀⣦⠸⠀⡔⢢⠒⠬⠑⣈⠌⡁⠎⡠⠐⠠⠐⠈⠄⠁⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠄⠈⠠⢈⠐⠀⠀
 ⣿⣿⠿⠻⠟⣳⡙⢎⠐⠀⠄⠁⢀⠐⠀⠀⠀⠀⠀⠀⢰⣦⣿⣿⣿⢏⠼⢛⡴⠣⠲⠔⠣⠜⠈⠄⠠⠉⢀⠠⠁⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⢶⣾⢔⡣⣜⡐⠣⠙⣌⠓⣈⠂⠥⠈⠡⠌⠁⠈⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡐⠀⠆⠀⠂⠐⠀
 */
-#pragma omp parallel for default(none) shared(img_texts_size, img, density, bg, render_results, scale)
+#pragma omp parallel for default(none) shared(img_texts_size, msg, density, bg, render_results, scale)
     for (size_t i = 0; i < img_texts_size; ++i) {
 #ifndef DEBUG
-        const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale);
+        const auto result = pango::rasterizer::raster(msg.pangos.at(i), scale);
 #else
-        const auto result = pango::rasterizer::raster(img.text_entries.at(i), scale, DEBUG_COLORS);
+        const auto result = pango::rasterizer::raster(msg.pangos.at(i), scale, DEBUG_COLORS);
 #endif
 
         Magick::Image text;
@@ -136,7 +133,7 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
         text.trim();
 #endif
 
-        render_results[i] = std::make_pair(text, calculate_offsets(text, bg, img.text_entries.at(i), result, scale));
+        render_results[i] = std::make_pair(text, calculate_offsets(bg, msg.pangos.at(i), result, scale));
     }
 
     for (const auto &[img, offset] : render_results) {
@@ -146,7 +143,7 @@ inline Magick::Image renderer::render_image(const templates::image &img, const M
     return bg;
 }
 
-inline Magick::Point renderer::calculate_offsets(const Magick::Image &t_img, const Magick::Image &bg, const pango::text &text, const pango::raster_text& r_text,
+inline Magick::Point renderer::calculate_offsets(const Magick::Image &bg, const pango_message &text, const pango::raster_text& r_text,
     const Magick::Point &scale) {
 
     const double x_offset = std::clamp(

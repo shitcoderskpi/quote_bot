@@ -11,7 +11,6 @@
 #include <spdlog/spdlog.h>
 
 #include "globals.h"
-#include "text.h"
 
 namespace pango {
     font_metrics::~font_metrics() noexcept {
@@ -38,7 +37,7 @@ namespace pango {
         return Magick::Point{lhs.x() / rhs, lhs.y() / rhs};
     }
 
-    int rasterizer::calculate_width(const text &t, const PangoRectangle logical) {
+    int rasterizer::calculate_width(const pango_message &t, const PangoRectangle logical) {
         if (t.wrap_width <= 0 || t.wrap_mode == PANGO_WRAP_NONE) {
             return PANGO_PIXELS(logical.width);
         }
@@ -48,9 +47,9 @@ namespace pango {
 
 #ifdef DEBUG
 
-    raster_text rasterizer::raster(const text &t, const Magick::Point &scale, const bool debug_paint) {
+    raster_text rasterizer::raster(const pango_message &t, const Magick::Point &scale, const bool debug_paint) {
 #else
-    raster_text rasterizer::raster(const text &t, const Magick::Point &scale) {
+    raster_text rasterizer::raster(const pango_message &t, const Magick::Point &scale) {
 #endif
         cairo_surface_t *dummy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
         cairo_t *dummy_cr = cairo_create(dummy);
@@ -62,10 +61,10 @@ namespace pango {
             pango_layout_set_wrap(layout, t.wrap_mode);
         }
 
-        const auto markup = to_string(t);
+        const auto markup = t.markup;
         pango_layout_set_markup(layout, markup.c_str(), markup.length());
 
-        PangoFontDescription *font = pango_font_description_from_string(t.font_description().c_str());
+        PangoFontDescription *font = pango_font_description_from_string(t.font_description.c_str());
         pango_layout_set_font_description(layout, font);
 
 

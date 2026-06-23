@@ -71,7 +71,7 @@ def get_member_custom_title(member):
     return getattr(member, "custom_title", None)
 
 @REQUEST_TIME.time()
-@dp.message(Command(compile("q(oute)?")), F.chat.type.in_({"group", "supergroup"}))
+@dp.message(Command(compile("q(oute)?")))
 async def command_quote_handler(message: Message) -> None:
     reply = message.reply_to_message
 

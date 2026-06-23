@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="360"
-     height="{{ svg_height }}"
-     font-family="sans-serif">
+0;{{byte_len}};<svg xmlns="http://www.w3.org/2000/svg" width="450"
+     height="{{ svg_height }}">
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.15"/>
@@ -22,7 +21,7 @@
   <g filter="url(#shadow)">
     <rect
       x="47" y="1"
-      width="260"
+      width="350"
       height="{{ bubble_height }}"
       rx="16" ry="16"
       fill="#fff"
@@ -30,9 +29,7 @@
       stroke-width="1"
     />
   </g>
-
-  <text x="56" y="23" font-size="15px" font-weight="bold" fill="#2a5885">{{ username }}</text>
-  <text x="300" y="23" font-size="13px" fill="#888" text-anchor="end">{{ user_status }}</text>
-
-  <text x="56" y="46" wrap-width="{{ wrap_width }}" font-size="15px" fill="#000">{{ content }}</text>
-</svg>
+</svg>,
+1;{{byte_len}};56;23;0;0;0;sans bold 15;<span foreground="#2a5885">{{ username | e }}</span>,
+1;{{byte_len}};390;23;0;0;2;sans 13;<span foreground="#888888">{{ user_status | e }}</span>,
+1;{{byte_len}};56;46;{{wrap_width}};0;0;sans 15;<span foreground="#000000">{{ content | e }}</span>,

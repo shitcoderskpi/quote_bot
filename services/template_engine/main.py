@@ -1,4 +1,4 @@
-from template_generator import create_template, send_msg
+from template_generator import create_template
 from asyncio import sleep, run
 from logging import getLogger
 from config import LOG_LVL, PROMETHEUS_ADDR, logger_init, PROMETHEUS_PORT, LOG_FILE
@@ -10,8 +10,7 @@ async def main_loop():
 
     while True:
         try:
-            template, chatid = await create_template()
-            await send_msg(template, chatid)
+            await create_template(340)
         except Exception as e:
             logger.exception(f"Error in create_template: {e}")
         await sleep(0.1)

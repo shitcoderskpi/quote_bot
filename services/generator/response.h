@@ -8,7 +8,7 @@
 
 
 struct response {
-    long long chat_id;
+    std::string_view chat_id;
     std::string_view base64_img;
 
     [[nodiscard]] std::string to_json() const;

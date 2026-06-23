@@ -8,9 +8,11 @@
 #include <array>
 #include <cairo.h>
 #include <memory>
+#include <pango/pango-font.h>
 #include <spdlog/spdlog.h>
 
-#include "text.h"
+#include "parser.h"
+
 
 namespace pango {
 
@@ -47,9 +49,9 @@ namespace pango {
         ~rasterizer() noexcept = default;
 
 #ifdef DEBUG
-        static raster_text raster(const text &, const Magick::Point &, bool debug_paint);
+        static raster_text raster(const pango_message &, const Magick::Point &, bool debug_paint);
 #else
-        static raster_text raster(const text &, const Magick::Point &);
+        static raster_text raster(const pango_message &, const Magick::Point &);
 #endif
 
     private:
@@ -60,7 +62,7 @@ namespace pango {
         static constexpr std::array<std::array<unsigned char, 4>, 6> debug_colors{
                 red, {255, 0, 0, 255}, {255, 0, 255, 0}, {255, 178, 255, 255}, {255, 255, 255, 0}, {255, 239, 191, 4}};
 #endif
-        static int calculate_width(const text &t, PangoRectangle logical);
+        static int calculate_width(const pango_message &t, PangoRectangle logical);
     };
 
 } // namespace pango
