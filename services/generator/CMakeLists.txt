@@ -13,11 +13,8 @@ find_package(PkgConfig REQUIRED)
 find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
 find_package(OpenSSL COMPONENTS Crypto REQUIRED)
 find_package(OpenMP REQUIRED)
-find_package(simdjson REQUIRED)
 pkg_check_modules(ZSTD REQUIRED libzstd)
 
-
-find_library(PUGIXML_LIBRARY NAMES pugixml)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
 pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PANGO REQUIRED pango)
@@ -32,21 +29,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
-add_subdirectory(extern/cppcoro)
-
-cmake_policy(SET CMP0002 NEW)
-set(ENABLE_TESTING OFF CACHE BOOL "Disable tests in prometheus-cpp" FORCE)
-add_subdirectory(extern/prometheus-cpp EXCLUDE_FROM_ALL)
-
 # Core (named `kernel` because of prometheus-cpp's core lib conflicting)
-add_library(kernel
+add_library(core
         globals.h
         redis_queue.cpp
         redis_queue.h
         redis_reply.cpp
         redis_reply.h
-        preprocessor.cpp
-        preprocessor.h
         image.cpp
         image.h
         text.cpp
@@ -57,40 +46,32 @@ add_library(kernel
         renderer.h
         rasterizer.cpp
         rasterizer.h
-        json_parser.cpp
-        json_parser.h
         response.cpp
         response.h
         compressor.cpp
         compressor.h
         exceptions.h
 )
-target_compile_definitions(kernel PRIVATE MAGICKCORE_HDRI_ENABLE=1)
-target_include_directories(kernel PRIVATE ${HIREDIS_INCLUDE_DIRS})
-target_include_directories(kernel PRIVATE ${ZSTD_INCLUDE_DIRS})
-target_include_directories(kernel PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_compile_definitions(kernel PRIVATE $<$<CONFIG:Debug>:DEBUG>)
-target_include_directories(kernel PRIVATE extern/prometheus-cpp/core/include})
-target_include_directories(kernel PRIVATE extern/cppcoro/include)
-target_include_directories(kernel PRIVATE ${PUGIXML_INCLUDE_DIR})
-target_include_directories(kernel PRIVATE
+target_compile_definitions(core PRIVATE MAGICKCORE_HDRI_ENABLE=1)
+target_include_directories(core PRIVATE ${HIREDIS_INCLUDE_DIRS})
+target_include_directories(core PRIVATE ${ZSTD_INCLUDE_DIRS})
+target_include_directories(core PRIVATE ${ImageMagick_INCLUDE_DIRS})
+target_compile_definitions(core PRIVATE $<$<CONFIG:Debug>:DEBUG>)
+target_include_directories(core PRIVATE
         ${CAIRO_INCLUDE_DIRS}
         ${PANGO_INCLUDE_DIRS}
         ${PANGOCAIRO_INCLUDE_DIRS}
 )
 link_directories(${PANGO_LIBRARY_DIRS})
-target_link_libraries(kernel
+target_link_libraries(core
         spdlog::spdlog
         ${HIREDIS_LINK_LIBRARIES}
-        cppcoro
         ${ImageMagick_LIBRARIES}
         OpenSSL::Crypto
-        ${PUGIXML_LIBRARY}
         ${CAIRO_LIBRARIES}
         ${PANGO_LIBRARIES}
         ${PANGOCAIRO_LIBRARIES}
         OpenMP::OpenMP_CXX
-        simdjson
         ${ZSTD_LIBRARIES}
 )
 
@@ -106,8 +87,6 @@ add_executable(${PROJECT_NAME} main.cpp)
 target_compile_definitions(${PROJECT_NAME} PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(${PROJECT_NAME} PRIVATE ${HIREDIS_INCLUDE_DIRS})
 target_include_directories(${PROJECT_NAME} PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE extern/prometheus-cpp})
-target_include_directories(${PROJECT_NAME} PRIVATE extern/cppcoro/include)
 target_include_directories(${PROJECT_NAME} PRIVATE
         ${CAIRO_INCLUDE_DIRS}
         ${PANGO_INCLUDE_DIRS}
@@ -117,9 +96,7 @@ link_directories(${PANGO_LIBRARY_DIRS})
 
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-        kernel
-        prometheus-cpp::core
-        prometheus-cpp::pull
+        core
 )
 
 # Tests (using googletest)
@@ -133,9 +110,6 @@ add_executable(test_project tests/redis_tests.cpp
 target_compile_definitions(test_project PRIVATE MAGICKCORE_HDRI_ENABLE=1)
 target_include_directories(test_project PRIVATE ${HIREDIS_INCLUDE_DIRS})
 target_include_directories(test_project PRIVATE ${ImageMagick_INCLUDE_DIRS})
-target_include_directories(test_project PRIVATE extern/prometheus-cpp/core/include})
-target_include_directories(test_project PRIVATE extern/cppcoro/include)
-target_include_directories(test_project PRIVATE ${PUGIXML_INCLUDE_DIR})
 target_include_directories(test_project PRIVATE
         ${CAIRO_INCLUDE_DIRS}
         ${PANGO_INCLUDE_DIRS}
@@ -143,6 +117,6 @@ target_include_directories(test_project PRIVATE
 )
 link_directories(${PANGO_LIBRARY_DIRS})
 target_link_libraries(test_project PRIVATE
-        kernel
+        core
         GTest::gtest_main
 )
