@@ -1,4 +1,4 @@
-0;{{byte_len}};<svg xmlns="http://www.w3.org/2000/svg" width="450"
+0;{{byte_len}};<svg xmlns="http://www.w3.org/2000/svg" width="{{ svg_width }}"
      height="{{ svg_height }}">
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -21,7 +21,7 @@
   <g filter="url(#shadow)">
     <rect
       x="47" y="1"
-      width="350"
+      width="{{ bubble_width }}"
       height="{{ bubble_height }}"
       rx="16" ry="16"
       fill="#fff"

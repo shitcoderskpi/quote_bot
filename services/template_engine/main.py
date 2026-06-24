@@ -10,7 +10,7 @@ async def main_loop():
 
     while True:
         try:
-            await create_template(340)
+            await create_template()
         except Exception as e:
             logger.exception(f"Error in create_template: {e}")
         await sleep(0.1)

@@ -44,7 +44,8 @@ void on_dequeue(redisAsyncContext *ctx, definitely_not_a_void_void *reply, defin
                     spdlog::critical("Failed to parse decompressed string: {}", result.error());
                 }
                 const auto rend = static_cast<renderer *>(privdata);
-                auto img = rend->render_image(*result, Magick::Point{300, 300});
+                // 108 dpi is good enough for me. At least rendering time is down 4 times.
+                auto img = rend->render_image(*result, Magick::Point{108, 108});
 
                 img.depth(8);
                 img.alpha(true);
@@ -95,7 +96,7 @@ int main() {
     spdlog::debug("Hardware concurrency: {}", cores);
 
 
-    #pragma omp parallel for schedule(static) num_threads(cores) default(none) shared(redis_host, redis_port, cores, queue_name)
+    #pragma omp parallel for schedule(dynamic) num_threads(cores) default(none) shared(redis_host, redis_port, cores, queue_name)
     for (unsigned int i = 0; i < cores; ++i) {
         uv_loop_t loop;
         uv_loop_init(&loop);
