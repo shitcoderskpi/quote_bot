@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Configuration
-QUEUE_NAME="generate:jobs" # Change this to match your C++ queue_name
+QUEUE_NAME="generate:jobs"
 REDIS_HOST="127.0.0.1"
 REDIS_PORT="6379"
 

@@ -1,2 +1,4 @@
-*capnp.h
-*capnp.c++
+target/
+.git/
+*.md
+.env*
