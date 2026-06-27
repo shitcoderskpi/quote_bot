@@ -16,4 +16,5 @@ cmake-build*/
 *.log
 .vscode/
 .clang*
-
+target
+*.lock
