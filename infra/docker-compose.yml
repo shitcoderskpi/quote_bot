@@ -38,6 +38,7 @@ services:
       - RUST_LOG=info
       - REDIS_HOST
       - TEMPLATE
+      - DPI
     devices:
       - /dev/dri:/dev/dri
     restart: unless-stopped

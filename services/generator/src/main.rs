@@ -1,5 +1,7 @@
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use vello::kurbo::Affine;
+use vello::Scene;
 
 mod compressor;
 mod config;
@@ -43,7 +45,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
             Ok(Some(payload)) => {
-                info!("got request");
                 match compressor::decompress(&payload) {
                     Ok(raw) => {
                         let msg_result = if raw.trim_start().starts_with('{') {
@@ -95,7 +96,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                 text::draw_text_layers(&mut scene, &msg.texts, &mut font_cx, &mut layout_cx);
 
-                                match render_ctx.render_scene_to_pixels(&scene, width, height) {
+                                let scale = cfg.dpi as f64 / 96.0;
+                                let mut scaled_scene = Scene::new();
+                                scaled_scene.append(&scene, Some(Affine::scale(scale)));
+
+                                let scaled_width = (width as f64 * scale).ceil() as u32;
+                                let scaled_height = (height as f64 * scale).ceil() as u32;
+
+                                match render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height) {
                                     Ok((w, h, pixels)) => {
                                         info!("Rendered {}x{}", w, h);
                                         let mut webp_data = std::io::Cursor::new(Vec::new());
