@@ -7,7 +7,7 @@ from re import compile
 from aiogram import F, Bot, Dispatcher, html
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import BufferedInputFile, Message
 from asyncio import run
 from base64 import b64encode, b64decode
@@ -39,20 +39,31 @@ REQUEST_TIME = Summary("request_processing_time", "Time spent processing request
 class SerializableMessage:
     username: str
     user_status: str | None
+    user_role: str | None
     content: str
+    entities: list
     image: BytesIO
-    chat_id: int
+    header: dict
+    dpi: int | None = None
+    theme: str = "light"
 
 
     def to_json(self):
         self.image.seek(0)
-        return dumps({
-            "chat-id": self.chat_id,
+        data = {
+            "header": self.header,
             "username": self.username,
             "user_status": self.user_status,
+            "user_role": self.user_role,
             "content": self.content,
+            "entities": self.entities,
             "image": b64encode(self.image.read()).decode("UTF-8")
-            }, ensure_ascii=False).encode("utf-8")
+        }
+        if self.dpi is not None:
+            data["dpi"] = self.dpi
+        if self.theme != "light":
+            data["theme"] = self.theme
+        return dumps(data, ensure_ascii=False).encode("utf-8")
 
 
 @dp.message(CommandStart())
@@ -67,12 +78,52 @@ async def get_photos(msg: Message, limit: int = 1):
     logger.debug(f"Getting {msg.from_user.full_name}'s photos ...")
     return await bot.get_user_profile_photos(msg.from_user.id, limit=limit)
 
+def convert_entities(text: str, entities) -> list:
+    if not entities:
+        return []
+    result = []
+    text_utf16 = text.encode('utf-16-le')
+    for ent in entities:
+        # Only process basic formatting
+        if ent.type not in ("bold", "italic", "underline", "strikethrough", "code", "pre", "text_link", "url"):
+            continue
+            
+        prefix = text_utf16[:ent.offset * 2]
+        char_offset = len(prefix.decode('utf-16-le'))
+        
+        entity_utf16 = text_utf16[ent.offset * 2 : (ent.offset + ent.length) * 2]
+        char_length = len(entity_utf16.decode('utf-16-le'))
+        
+        byte_offset = len(text[:char_offset].encode('utf-8'))
+        byte_length = len(text[char_offset:char_offset+char_length].encode('utf-8'))
+        
+        result.append({
+            "type": ent.type,
+            "offset": byte_offset,
+            "length": byte_length
+        })
+    return result
+
 def get_member_custom_title(member):
     return getattr(member, "custom_title", None)
 
 @REQUEST_TIME.time()
 @dp.message(Command(compile("q(oute)?")))
-async def command_quote_handler(message: Message) -> None:
+async def command_quote_handler(message: Message, command: CommandObject) -> None:
+    dpi = None
+    theme = "light"
+    if command.args:
+        for arg in command.args.strip().split():
+            arg_lower = arg.lower()
+            if arg_lower in ("dark", "light"):
+                theme = arg_lower
+            else:
+                try:
+                    dpi = int(arg)
+                except ValueError:
+                    await message.answer("DPI must be an integer, or theme must be 'dark'/'light'.")
+                    return
+
     reply = message.reply_to_message
 
     if reply is None:
@@ -89,7 +140,29 @@ async def command_quote_handler(message: Message) -> None:
     else:
         logger.warning(f"User {reply.from_user.id} does not have any photos.")
 
-    msg = SerializableMessage(reply.from_user.full_name, get_member_custom_title(member), reply.text, avatar, reply.chat.id)
+    msg_header = {
+        "message_id": reply.message_id,
+        "chat": {"id": reply.chat.id},
+    }
+    converted_entities = convert_entities(reply.text or "", reply.entities)
+    
+    user_role = getattr(member, "status", None)
+    if user_role:
+        user_role = str(user_role.value if hasattr(user_role, "value") else user_role)
+    else:
+        user_role = "member"
+
+    msg = SerializableMessage(
+        reply.from_user.full_name, 
+        get_member_custom_title(member), 
+        user_role,
+        reply.text or "", 
+        converted_entities, 
+        avatar, 
+        msg_header, 
+        dpi, 
+        theme
+    )
 
     current_ms = int(time.time() * 1000)
 
@@ -103,7 +176,12 @@ async def command_quote_handler(message: Message) -> None:
     new_ms = int(time.time() * 1000)
     logger.critical(f"Time spent: {new_ms - current_ms} ms")
 
-    await bot.send_sticker(img_decoded.get("chat_id"), BufferedInputFile(img_b64, "quote.webp"))
+    header_data = img_decoded.get("header", {})
+    chat_id = header_data.get("chat", {}).get("id")
+    if chat_id is None:
+        chat_id = reply.chat.id
+    
+    await bot.send_sticker(chat_id, BufferedInputFile(img_b64, "quote.webp"), reply_to_message_id=header_data.get("message_id"))
 
 
 async def bot_() -> None:

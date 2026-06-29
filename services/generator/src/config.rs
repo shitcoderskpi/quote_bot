@@ -6,7 +6,7 @@ pub struct Config {
     pub redis_port: u16,
     pub queue_name: String,
     pub results_queue: String,
-    pub template_path: String,
+    pub templates_dir: String,
     pub dpi: f32,
 }
 
@@ -22,7 +22,13 @@ impl Config {
         let queue_name = env::var("QUEUE_NAME").unwrap_or_else(|_| "generate:jobs".to_string());
         
         let results_queue = env::var("RESULTS_QUEUE").unwrap_or_else(|_| "generate:results".to_string());
-        let template_path = env::var("TEMPLATE").map_err(|_| "TEMPLATE environment variable is not set".to_string())?;
+        let templates_dir = env::var("TEMPLATE").map_err(|_| "TEMPLATE environment variable is not set".to_string())?;
+        
+        let md = std::fs::metadata(&templates_dir)
+            .map_err(|e| format!("Failed to access TEMPLATE path '{}': {}", templates_dir, e))?;
+        if !md.is_dir() {
+            return Err(format!("TEMPLATE path '{}' is not a directory", templates_dir));
+        }
         
         let dpi = env::var("DPI")
             .ok()
@@ -34,7 +40,7 @@ impl Config {
             redis_port,
             queue_name,
             results_queue,
-            template_path,
+            templates_dir,
             dpi
         })
     }

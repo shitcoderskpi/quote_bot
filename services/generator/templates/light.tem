@@ -1,0 +1,39 @@
+0;{{byte_len}};<svg xmlns="http://www.w3.org/2000/svg" width="{{ svg_width }}"
+     height="{{ svg_height }}">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.15"/>
+    </filter>
+    <clipPath id="circle-clip">
+      <circle cx="19" cy="{{ bubble_height - 17 }}" r="18" />
+    </clipPath>
+  </defs>
+
+  <circle cx="19" cy="{{ bubble_height - 17 }}" r="18" fill="#ddd" />
+
+  <image
+    href="data:image/jpeg;base64,{{ image }}"
+    x="1" y="{{ bubble_height - 35 }}"
+    width="36" height="36"
+    clip-path="url(#circle-clip)"
+  />
+
+  <g filter="url(#shadow)">
+    <path d="
+      M 63 1
+      L {{ 47 + bubble_width - 16 }} 1
+      A 16 16 0 0 1 {{ 47 + bubble_width }} 17
+      L {{ 47 + bubble_width }} {{ 1 + bubble_height - 16 }}
+      A 16 16 0 0 1 {{ 47 + bubble_width - 16 }} {{ 1 + bubble_height }}
+      L 37 {{ 1 + bubble_height }}
+      Q 47 {{ 1 + bubble_height }} 47 {{ 1 + bubble_height - 18 }}
+      L 47 17
+      A 16 16 0 0 1 63 1
+      Z"
+      fill="#EFFDDE"
+    />
+  </g>
+</svg>,
+1;{{byte_len}};56;27;0;10;sans-serif;15.0;700;#4CA635;;{{ username }},
+1;{{byte_len}};56;27;{{wrap_width}};12;sans-serif;13.0;400;{%- if user_role == "creator" -%}#A682D1{%- elif user_role == "administrator" -%}#58AB63{%- else -%}#21212166{%- endif -%};{%- if user_role == "creator" -%}#A682D122{%- elif user_role == "administrator" -%}#58AB6322{%- endif -%};{{ user_status }},
+3;{{byte_len}};56;32;{{wrap_width}};0;sans-serif;15.0;400;#000000;#64AA7C;#3199CF;{{ entities }};{{ content }},

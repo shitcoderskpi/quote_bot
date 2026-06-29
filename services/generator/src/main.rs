@@ -5,12 +5,85 @@ use vello::Scene;
 
 mod compressor;
 mod config;
+mod layout;
 mod parser;
 mod redis_queue;
 mod renderer;
-mod text;
-mod layout;
 mod templater;
+mod text;
+
+fn process_job(
+    raw: &str,
+    cfg: &config::Config,
+    render_ctx: &mut renderer::RenderContext,
+    font_cx: &mut parley::FontContext,
+    layout_cx: &mut parley::LayoutContext,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    // ── Stage 1: Parse input and produce wire-format message ──
+    let (msg, dpi) = if raw.trim_start().starts_with('{') {
+        // JSON input → template pipeline
+        let input_msg: templater::InputMessage = serde_json::from_str(raw)?;
+        let msg_dpi = input_msg.dpi;
+
+        let theme = input_msg.theme.as_deref().unwrap_or("light");
+        let template_name = if theme == "dark" { "dark.tem" } else { "light.tem" };
+        let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
+        let template_str = std::fs::read_to_string(&template_path)?;
+
+        // Parse template once — used for both font lookups and rendering
+        let template = templater::ParsedTemplate::parse(&template_str);
+        let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
+        let payload_str = template.render(&input_msg, &quote_layout)?;
+        let msg = parser::parse(&payload_str)?;
+
+        (msg, msg_dpi)
+    } else {
+        // Raw wire-format input (no template)
+        let msg = parser::parse(raw)?;
+        (msg, None)
+    };
+
+    // ── Stage 2: Build vello scene from SVG ──
+    let mut scene = vello_svg::render(&msg.svg.data)?;
+
+    let tree = vello_svg::usvg::Tree::from_str(
+        &msg.svg.data,
+        &vello_svg::usvg::Options::default(),
+    )?;
+    let size = tree.size();
+    let width = size.width().ceil() as u32;
+    let height = size.height().ceil() as u32;
+
+    // ── Stage 3: Draw text layers onto scene ──
+    text::draw_text_layers(&mut scene, &msg.texts, font_cx, layout_cx);
+
+    // ── Stage 4: Scale for DPI and rasterize ──
+    let dpi = dpi.unwrap_or(cfg.dpi);
+    let scale = dpi as f64 / 96.0;
+    let mut scaled_scene = Scene::new();
+    scaled_scene.append(&scene, Some(Affine::scale(scale)));
+
+    let scaled_width = (width as f64 * scale).ceil() as u32;
+    let scaled_height = (height as f64 * scale).ceil() as u32;
+
+    let (w, h, pixels) =
+        render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height)?;
+    info!("Rendered {}x{}", w, h);
+
+    // ── Stage 5: Encode to WebP ──
+    let mut webp_data = std::io::Cursor::new(Vec::new());
+    let img_buf = image::RgbaImage::from_raw(w, h, pixels)
+        .ok_or("Failed to create RgbaImage from raw pixels")?;
+    img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
+
+    // ── Stage 6: Build result JSON, compress, return ──
+    use base64::prelude::*;
+    let b64_img = BASE64_STANDARD.encode(webp_data.into_inner());
+    let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, msg.header, b64_img);
+
+    let compressed = compressor::compress(&json_res, 9)?;
+    Ok(compressed)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,110 +116,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut layout_cx = parley::LayoutContext::new();
 
     loop {
-        match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
-            Ok(Some(payload)) => {
-                match compressor::decompress(&payload) {
-                    Ok(raw) => {
-                        let msg_result = if raw.trim_start().starts_with('{') {
-                            match serde_json::from_str::<templater::InputMessage>(&raw) {
-                                Ok(input_msg) => {
-                                    let content = input_msg.content.as_deref().unwrap_or("").trim_end();
-                                    let template_str_res = std::fs::read_to_string(&cfg.template_path);
-                                    if let Err(e) = template_str_res {
-                                        Err(format!("Failed to read template file: {}", e))
-                                    } else {
-                                        let template_str = template_str_res?;
-                                        let font = layout::extract_content_font(&template_str);
-                                        let dims = layout::compute_dimensions(content, &mut font_cx, &mut layout_cx, &font);
-                                        match templater::render_payload(&cfg, &input_msg, &dims) {
-                                            Ok(payload_str) => parser::parse(&payload_str).map_err(|e| format!("{:?}", e)),
-                                            Err(e) => Err(e),
-                                        }
-                                    }
-                                }
-                                Err(e) => Err(format!("Failed to parse JSON: {}", e)),
-                            }
-                        } else {
-                            parser::parse(&raw).map_err(|e| format!("{:?}", e))
-                        };
-
-                        match msg_result {
-                            Ok(msg) => {
-                                let mut scene = match vello_svg::render(&msg.svg.data) {
-                                    Ok(s) => s,
-                                    Err(e) => {
-                                        error!("Failed to build scene from SVG: {}", e);
-                                        continue;
-                                    }
-                                };
-
-                                let tree = match vello_svg::usvg::Tree::from_str(
-                                    &msg.svg.data,
-                                    &vello_svg::usvg::Options::default(),
-                                ) {
-                                    Ok(t) => t,
-                                    Err(e) => {
-                                        error!("Failed to parse SVG tree: {}", e);
-                                        continue;
-                                    }
-                                };
-                                let size = tree.size();
-                                let width = size.width().ceil() as u32;
-                                let height = size.height().ceil() as u32;
-
-                                text::draw_text_layers(&mut scene, &msg.texts, &mut font_cx, &mut layout_cx);
-
-                                let scale = cfg.dpi as f64 / 96.0;
-                                let mut scaled_scene = Scene::new();
-                                scaled_scene.append(&scene, Some(Affine::scale(scale)));
-
-                                let scaled_width = (width as f64 * scale).ceil() as u32;
-                                let scaled_height = (height as f64 * scale).ceil() as u32;
-
-                                match render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height) {
-                                    Ok((w, h, pixels)) => {
-                                        info!("Rendered {}x{}", w, h);
-                                        let mut webp_data = std::io::Cursor::new(Vec::new());
-                                        if let Some(img_buf) = image::RgbaImage::from_raw(w, h, pixels) {
-                                            if let Err(e) = img_buf.write_to(&mut webp_data, image::ImageFormat::WebP) {
-                                                error!("Failed to encode WebP: {}", e);
-                                                continue;
-                                            }
-
-                                            use base64::prelude::*;
-                                            let b64_img = BASE64_STANDARD.encode(webp_data.into_inner());
-                                            let json_res = format!(r#"{{"chat_id": {}, "image": "{}"}}"#, msg.chat_id, b64_img);
-
-                                            match compressor::compress(&json_res, 9) {
-                                                Ok(compressed) => {
-                                                    if let Err(e) = queue.enqueue(&cfg.results_queue, compressed).await {
-                                                        error!("Failed to enqueue result: {}", e);
-                                                    } else {
-                                                        info!("Pushed result for chat_id {}", msg.chat_id);
-                                                    }
-                                                }
-                                                Err(e) => error!("Failed to compress result: {}", e),
-                                            }
-                                        } else {
-                                            error!("Failed to create RgbaImage from raw pixels");
-                                        }
-                                    }
-                                    Err(e) => error!("Render failed: {}", e),
-                                }
-                            }
-                            Err(e) => error!("Failed to parse job: {}", e),
-                        }
-                    }
-                    Err(e) => error!("Failed to decompress job: {}", e),
-                }
-            }
+        let payload = match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
+            Ok(Some(p)) => p,
             Ok(None) => continue,
             Err(e) => {
-                // if e.is_timeout() {
-                //     continue;
-                // }
                 error!("Error dequeuing job: {}", e);
+                continue;
             }
+        };
+
+        let raw = match compressor::decompress(&payload) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to decompress job: {}", e);
+                continue;
+            }
+        };
+
+        match process_job(&raw, &cfg, &mut render_ctx, &mut font_cx, &mut layout_cx) {
+            Ok(result) => {
+                if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
+                    error!("Failed to enqueue result: {}", e);
+                } else {
+                    info!("Pushed result for message");
+                }
+            }
+            Err(e) => error!("Job failed: {}", e),
         }
     }
 }

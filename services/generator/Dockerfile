@@ -25,19 +25,28 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libvulkan1 \
     mesa-vulkan-drivers \
-    libfontconfig1 \
-    libfreetype6 \
-    fonts-jetbrains-mono \
-    fonts-noto \
+    fontconfig \
     fonts-noto-color-emoji \
+    git \
     ca-certificates \
+    # TODO: maybe consider to repack these to png, or use other fonts (like Inter ot similar) so Apple won't be a problem. Just in case \
+    && git clone https://github.com/sahibjotsaggu/San-Francisco-Pro-Fonts.git /tmp/sf-pro \
+    && git clone https://github.com/supercomputra/SF-Mono-Font.git /tmp/sf-mono \
+    && apt-get purge -y fonts-dejavu-core fonts-dejavu \
+    && rm -rf /usr/share/fonts/truetype/dejavu \
+    && mkdir -p /usr/local/share/fonts/sf-pro /usr/local/share/fonts/sf-mono \
+    && cp /tmp/sf-pro/*.otf /usr/local/share/fonts/sf-pro/ \
+    && cp /tmp/sf-mono/*.otf /usr/local/share/fonts/sf-mono/ \
+    && rm -rf /tmp/sf-pro /tmp/sf-mono \
+    && apt-get purge -y git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/src/generator_rs/target/release/generator_rs /usr/local/bin/generator_rs
-COPY tg_template.tem /app/templates/tg_template.tem
+COPY 50-emoji.conf /etc/fonts/conf.d/50-emoji.conf
+RUN fc-cache -f
 
+COPY --from=builder /usr/src/generator_rs/target/release/generator_rs /usr/local/bin/generator_rs
+COPY templates /app/templates
 
 
 CMD ["generator_rs"]
