@@ -2,6 +2,7 @@ use serde::Deserialize;
 use minijinja::Environment;
 
 use crate::layout::QuoteLayout;
+use crate::parser::{self, ParsedMessage, SvgMessage};
 
 #[derive(Deserialize, Debug)]
 pub struct InputMessage {
@@ -118,14 +119,12 @@ impl ParsedTemplate {
         FontSpec::default()
     }
 
-    /// Render all template blocks into wire-format payload string.
-    /// Prepends the header block (type 2) and renders each template block
-    /// with the given input message and computed layout.
-    pub fn render(
+    /// Build a ParsedMessage directly without going through COFFIN.
+    pub fn build_message(
         &self,
         msg: &InputMessage,
         layout: &QuoteLayout,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    ) -> Result<ParsedMessage, Box<dyn std::error::Error>> {
         let env = Environment::new();
 
         let ctx = minijinja::context! {
@@ -148,19 +147,13 @@ impl ParsedTemplate {
             wrap_width => layout.wrap_width,
         };
 
-        let mut payload = String::new();
+        let mut svg = SvgMessage { data: String::new() };
+        let mut texts = Vec::new();
 
-        // Header block (type 2)
-        let header_str = msg.header.as_ref()
+        let header = msg.header.as_ref()
             .map(|h| h.to_string())
             .unwrap_or_else(|| "{}".to_string());
-        payload.push_str("2;");
-        payload.push_str(&header_str.len().to_string());
-        payload.push(';');
-        payload.push_str(&header_str);
-        payload.push(',');
 
-        // Template blocks
         for block in &self.blocks {
             if msg.user_status.is_none() && block.body_template.contains("user_status") {
                 continue;
@@ -168,14 +161,18 @@ impl ParsedTemplate {
 
             let rendered = env.render_str(&block.body_template, &ctx)?;
 
-            payload.push_str(&block.block_type.to_string());
-            payload.push(';');
-            payload.push_str(&rendered.len().to_string());
-            payload.push(';');
-            payload.push_str(&rendered);
-            payload.push(',');
+            match block.block_type {
+                0 => svg.data = rendered,
+                1 => texts.push(parser::parse_text(&rendered)?),
+                3 => texts.push(parser::parse_rich_text(&rendered)?),
+                _ => return Err(format!("Unknown block type: {}", block.block_type).into()),
+            }
         }
 
-        Ok(payload)
+        Ok(ParsedMessage {
+            header,
+            svg,
+            texts,
+        })
     }
 }

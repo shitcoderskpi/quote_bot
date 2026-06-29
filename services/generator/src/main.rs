@@ -33,8 +33,7 @@ fn process_job(
         // Parse template once — used for both font lookups and rendering
         let template = templater::ParsedTemplate::parse(&template_str);
         let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
-        let payload_str = template.render(&input_msg, &quote_layout)?;
-        let msg = parser::parse(&payload_str)?;
+        let msg = template.build_message(&input_msg, &quote_layout)?;
 
         (msg, msg_dpi)
     } else {
