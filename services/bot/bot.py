@@ -37,6 +37,7 @@ REQUEST_TIME = Summary("request_processing_time", "Time spent processing request
 
 @dataclass
 class SerializableMessage:
+    user_id: int
     username: str
     user_status: str | None
     user_role: str | None
@@ -52,6 +53,7 @@ class SerializableMessage:
         self.image.seek(0)
         data = {
             "header": self.header,
+            "user_id": self.user_id,
             "username": self.username,
             "user_status": self.user_status,
             "user_role": self.user_role,
@@ -153,6 +155,7 @@ async def command_quote_handler(message: Message, command: CommandObject) -> Non
         user_role = "member"
 
     msg = SerializableMessage(
+        reply.from_user.id,
         reply.from_user.full_name, 
         get_member_custom_title(member), 
         user_role,
