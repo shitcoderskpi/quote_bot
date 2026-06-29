@@ -30,6 +30,6 @@
     />
   </g>
 </svg>,
-1;{{byte_len}};56;23;0;0;0;sans bold 15;<span foreground="#2a5885">{{ username | e }}</span>,
-1;{{byte_len}};390;23;0;0;2;sans 13;<span foreground="#888888">{{ user_status | e }}</span>,
-1;{{byte_len}};56;46;{{wrap_width}};0;0;sans 15;<span foreground="#000000">{{ content | e }}</span>,
+1;{{byte_len}};56;3;0;0;sans-serif;15.0;700;#2a5885;{{ username }},
+1;{{byte_len}};390;3;0;2;sans-serif;13.0;400;#888888;{{ user_status }},
+1;{{byte_len}};56;26;{{wrap_width}};0;sans-serif;15.0;400;#000000;{{ content }},
