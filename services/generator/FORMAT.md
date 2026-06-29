@@ -1,8 +1,8 @@
-# COFFIN
+# COFFIN v2 (Codename: Nail)
 
 **C**himeric **O**ffset **F**rankenstein **F**ormat for **I**mage **N**otation
 
-The generator uses COFFIN internally as the intermediate representation between the template renderer and the scene compositor. Each payload is a sequence of typed, length-prefixed segments:
+The generator uses COFFIN syntax to define the structural blocks inside `.tem` template files. Each block is a sequence of typed, length-prefixed segments:
 ```text
 type;length;data[,]
 ```
