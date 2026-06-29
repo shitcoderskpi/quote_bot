@@ -7,6 +7,7 @@ use crate::layout::QuoteLayout;
 pub struct InputMessage {
     pub header: Option<serde_json::Value>,
     pub entities: Option<serde_json::Value>,
+    pub user_id: Option<u64>,
     pub username: Option<String>,
     pub user_status: Option<String>,
     pub user_role: Option<String>,
@@ -50,6 +51,35 @@ pub struct TemplateBlock {
 #[derive(Debug)]
 pub struct ParsedTemplate {
     pub blocks: Vec<TemplateBlock>,
+}
+
+const AVATAR_GRADIENTS: &[(&str, &str)] = &[
+    ("#FF885E", "#FF516A"), // Red
+    ("#FFCD6A", "#FFA85C"), // Orange
+    ("#82B1FF", "#665FFF"), // Violet
+    ("#A0DE7E", "#54CB68"), // Green
+    ("#53EDD6", "#28C9B7"), // Cyan
+    ("#72D5FD", "#2A9EF1"), // Blue
+    ("#E0A2F3", "#D669ED"), // Pink
+];
+
+fn get_avatar_gradient(user_id: u64) -> (&'static str, &'static str) {
+    AVATAR_GRADIENTS[(user_id % 7) as usize]
+}
+
+fn get_avatar_initials(name: &str) -> String {
+    let mut initials = String::new();
+    let mut words = name.split_whitespace();
+    for _ in 0..2 {
+        if let Some(word) = words.next() {
+            if let Some(c) = word.chars().next() {
+                for uc in c.to_uppercase() {
+                    initials.push(uc);
+                }
+            }
+        }
+    }
+    initials
 }
 
 impl ParsedTemplate {
@@ -128,9 +158,14 @@ impl ParsedTemplate {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let env = Environment::new();
 
+        let username_val = msg.username.as_deref().unwrap_or("");
+        let avatar_initials = get_avatar_initials(username_val);
+        let user_id = msg.user_id.unwrap_or(0);
+        let (avatar_color_top, avatar_color_bottom) = get_avatar_gradient(user_id);
+
         let ctx = minijinja::context! {
             // Content variables
-            username => msg.username.as_deref().unwrap_or(""),
+            username => username_val,
             user_status => msg.user_status.as_deref(),
             user_role => msg.user_role.as_deref().unwrap_or("member"),
             content => msg.content.as_deref().unwrap_or("").trim_end(),
@@ -138,6 +173,9 @@ impl ParsedTemplate {
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "[]".to_string()),
             image => msg.image.as_deref().unwrap_or(""),
+            avatar_initials => avatar_initials,
+            avatar_color_top => avatar_color_top,
+            avatar_color_bottom => avatar_color_bottom,
             // Layout — canvas
             svg_width => layout.canvas.width,
             svg_height => layout.canvas.height,
@@ -161,8 +199,13 @@ impl ParsedTemplate {
         payload.push(',');
 
         // Template blocks
+        let has_image = msg.image.as_deref().map_or(false, |s| !s.is_empty());
+
         for block in &self.blocks {
             if msg.user_status.is_none() && block.body_template.contains("user_status") {
+                continue;
+            }
+            if (has_image || avatar_initials.is_empty()) && block.body_template.contains("avatar_initials") {
                 continue;
             }
 
