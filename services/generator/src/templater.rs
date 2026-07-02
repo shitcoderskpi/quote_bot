@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use minijinja::Environment;
-
+use tracing::warn;
 use crate::layout::QuoteLayout;
 
 #[derive(Deserialize, Debug)]
@@ -63,8 +63,12 @@ const AVATAR_GRADIENTS: &[(&str, &str)] = &[
     ("#E0A2F3", "#D669ED"), // Pink
 ];
 
-fn get_avatar_gradient(user_id: u64) -> (&'static str, &'static str) {
-    AVATAR_GRADIENTS[(user_id % 7) as usize]
+fn get_avatar_gradient(grad_id: u64) -> (&'static str, &'static str) {
+    if grad_id >= 7 {
+        warn!("grad_id is not normalized! It will be normalised, but it could lead to rendering artifacts.");
+        return AVATAR_GRADIENTS[(grad_id % 7) as usize]
+    }
+    AVATAR_GRADIENTS[(grad_id) as usize]
 }
 
 fn get_avatar_initials(name: &str) -> String {
