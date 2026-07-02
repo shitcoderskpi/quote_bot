@@ -89,7 +89,7 @@ impl ParsedTemplate {
             // Extract font spec from text/rich-text blocks.
             // Body fields: x;y;wrap;align;family;size;weight;...
             // Font is at positions 4, 5, 6 within the body.
-            let font = (block_type == SVG_BLOCK || block_type == RICH_TEXT_BLOCK)
+            let font = (block_type == TEXT_BLOCK || block_type == RICH_TEXT_BLOCK)
                 .then(|| {
                     let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
 
@@ -103,8 +103,7 @@ impl ParsedTemplate {
                         error!("Error: Invalid body_template format. Expected at least 7 parts, found {}", body_parts.len());
                         None
                     }
-                })
-                .flatten();
+                }).flatten();
 
             blocks.push(TemplateBlock {
                 block_type,
@@ -120,7 +119,7 @@ impl ParsedTemplate {
     /// Falls back to default font if no matching block is found.
     pub fn font_for(&self, marker: &str) -> FontSpec {
         for block in &self.blocks {
-            if (block.block_type == SVG_BLOCK || block.block_type == RICH_TEXT_BLOCK)
+            if (block.block_type == TEXT_BLOCK || block.block_type == RICH_TEXT_BLOCK)
                 && block.body_template.contains(marker)
             {
                 if let Some(ref font) = block.font {
