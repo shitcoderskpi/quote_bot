@@ -1,8 +1,12 @@
 use serde::Deserialize;
 use minijinja::Environment;
-
+use tracing::error;
 use crate::layout::QuoteLayout;
 use crate::parser::{self, ParsedMessage, SvgMessage};
+
+const DEFAULT_FONT_FAMILY: &str = "sans-serif";
+const DEFAULT_FONT_SIZE: f32 = 15.0;
+const DEFAULT_FONT_WEIGHT: f32 = 400.0;
 
 #[derive(Deserialize, Debug)]
 pub struct InputMessage {
@@ -28,9 +32,9 @@ pub struct FontSpec {
 impl Default for FontSpec {
     fn default() -> Self {
         Self {
-            family: "sans-serif".to_string(),
-            size: 15.0,
-            weight: 400.0,
+            family: DEFAULT_FONT_FAMILY.to_string(),
+            size: DEFAULT_FONT_SIZE,
+            weight: DEFAULT_FONT_WEIGHT,
         }
     }
 }
@@ -79,20 +83,22 @@ impl ParsedTemplate {
             // Extract font spec from text/rich-text blocks.
             // Body fields: x;y;wrap;align;family;size;weight;...
             // Font is at positions 4, 5, 6 within the body.
-            let font = if block_type == 1 || block_type == 3 {
-                let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
-                if body_parts.len() >= 7 {
-                    Some(FontSpec {
-                        family: body_parts[4].trim().to_string(),
-                        size: body_parts[5].trim().parse().unwrap_or(15.0),
-                        weight: body_parts[6].trim().parse().unwrap_or(400.0),
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let font = (block_type == 1 || block_type == 3)
+                .then(|| {
+                    let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
+
+                    if body_parts.len() >= 7 {
+                        Some(FontSpec {
+                            family: body_parts[4].trim().to_string(),
+                            size: body_parts[5].trim().parse().unwrap_or(DEFAULT_FONT_SIZE),
+                            weight: body_parts[6].trim().parse().unwrap_or(DEFAULT_FONT_WEIGHT),
+                        })
+                    } else {
+                        error!("Error: Invalid body_template format. Expected at least 7 parts, found {}", body_parts.len());
+                        None
+                    }
+                })
+                .flatten();
 
             blocks.push(TemplateBlock {
                 block_type,
@@ -124,8 +130,8 @@ impl ParsedTemplate {
         &self,
         msg: &InputMessage,
         layout: &QuoteLayout,
+        env: &Environment,
     ) -> Result<ParsedMessage, Box<dyn std::error::Error>> {
-        let env = Environment::new();
 
         let ctx = minijinja::context! {
             // Content variables

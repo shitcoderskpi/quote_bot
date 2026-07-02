@@ -18,6 +18,7 @@ fn process_job(
     render_ctx: &mut renderer::RenderContext,
     font_cx: &mut parley::FontContext,
     layout_cx: &mut parley::LayoutContext,
+    env: &minijinja::Environment,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // ── Stage 1: Parse input and produce wire-format message ──
     let (msg, dpi) = if raw.trim_start().starts_with('{') {
@@ -33,7 +34,7 @@ fn process_job(
         // Parse template once — used for both font lookups and rendering
         let template = templater::ParsedTemplate::parse(&template_str);
         let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
-        let msg = template.build_message(&input_msg, &quote_layout)?;
+        let msg = template.build_message(&input_msg, &quote_layout, &env)?;
 
         (msg, msg_dpi)
     } else {
@@ -132,7 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match process_job(&raw, &cfg, &mut render_ctx, &mut font_cx, &mut layout_cx) {
+        let env = minijinja::Environment::new();
+        match process_job(&raw, &cfg, &mut render_ctx, &mut font_cx, &mut layout_cx, &env) {
             Ok(result) => {
                 if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
                     error!("Failed to enqueue result: {}", e);
