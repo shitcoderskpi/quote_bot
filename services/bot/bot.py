@@ -53,7 +53,7 @@ class SerializableMessage:
         self.image.seek(0)
         data = {
             "header": self.header,
-            "user_id": self.user_id,
+            "grad_id": self.grad_id,
             "username": self.username,
             "user_status": self.user_status,
             "user_role": self.user_role,

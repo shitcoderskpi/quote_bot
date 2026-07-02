@@ -7,7 +7,7 @@ use crate::layout::QuoteLayout;
 pub struct InputMessage {
     pub header: Option<serde_json::Value>,
     pub entities: Option<serde_json::Value>,
-    pub user_id: Option<u64>,
+    pub grad_id: Option<u64>,
     pub username: Option<String>,
     pub user_status: Option<String>,
     pub user_role: Option<String>,
@@ -164,8 +164,8 @@ impl ParsedTemplate {
 
         let username_val = msg.username.as_deref().unwrap_or("");
         let avatar_initials = get_avatar_initials(username_val);
-        let user_id = msg.user_id.unwrap_or(0);
-        let (avatar_color_top, avatar_color_bottom) = get_avatar_gradient(user_id);
+        let grad_id = msg.grad_id.unwrap_or(0);
+        let (avatar_color_top, avatar_color_bottom) = get_avatar_gradient(grad_id);
 
         let ctx = minijinja::context! {
             // Content variables
