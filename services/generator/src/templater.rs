@@ -1,12 +1,18 @@
 use serde::Deserialize;
 use minijinja::Environment;
 use tracing::error;
+use vello_svg::usvg::ImageKind::SVG;
 use crate::layout::QuoteLayout;
 use crate::parser::{self, ParsedMessage, SvgMessage};
 
 const DEFAULT_FONT_FAMILY: &str = "sans-serif";
 const DEFAULT_FONT_SIZE: f32 = 15.0;
 const DEFAULT_FONT_WEIGHT: f32 = 400.0;
+
+const SVG_BLOCK: u8 = 0;
+const TEXT_BLOCK: u8 = 1;
+const CHAT_ID_BLOCK: u8 = 2;
+const RICH_TEXT_BLOCK: u8 = 3;
 
 #[derive(Deserialize, Debug)]
 pub struct InputMessage {
@@ -43,7 +49,7 @@ impl Default for FontSpec {
 #[derive(Debug)]
 pub struct TemplateBlock {
     /// Wire-format message type (0=SVG, 1=Text, 3=RichText).
-    pub block_type: i32,
+    pub block_type: u8,
     /// The minijinja template body (everything after `type;byte_len;`).
     pub body_template: String,
     /// Pre-extracted font info for text/rich-text blocks.
@@ -74,7 +80,7 @@ impl ParsedTemplate {
                 continue;
             }
 
-            let block_type: i32 = match parts[0].trim().parse() {
+            let block_type: u8 = match parts[0].trim().parse() {
                 Ok(t) => t,
                 Err(_) => continue,
             };
@@ -83,7 +89,7 @@ impl ParsedTemplate {
             // Extract font spec from text/rich-text blocks.
             // Body fields: x;y;wrap;align;family;size;weight;...
             // Font is at positions 4, 5, 6 within the body.
-            let font = (block_type == 1 || block_type == 3)
+            let font = (block_type == SVG_BLOCK || block_type == RICH_TEXT_BLOCK)
                 .then(|| {
                     let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
 
@@ -114,7 +120,7 @@ impl ParsedTemplate {
     /// Falls back to default font if no matching block is found.
     pub fn font_for(&self, marker: &str) -> FontSpec {
         for block in &self.blocks {
-            if (block.block_type == 1 || block.block_type == 3)
+            if (block.block_type == SVG_BLOCK || block.block_type == RICH_TEXT_BLOCK)
                 && block.body_template.contains(marker)
             {
                 if let Some(ref font) = block.font {
@@ -168,9 +174,9 @@ impl ParsedTemplate {
             let rendered = env.render_str(&block.body_template, &ctx)?;
 
             match block.block_type {
-                0 => svg.data = rendered,
-                1 => texts.push(parser::parse_text(&rendered)?),
-                3 => texts.push(parser::parse_rich_text(&rendered)?),
+                SVG_BLOCK => svg.data = rendered,
+                TEXT_BLOCK=> texts.push(parser::parse_text(&rendered)?),
+                RICH_TEXT_BLOCK => texts.push(parser::parse_rich_text(&rendered)?),
                 _ => return Err(format!("Unknown block type: {}", block.block_type).into()),
             }
         }
