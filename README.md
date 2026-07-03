@@ -2,26 +2,32 @@
 ```bash
 git clone --recursive https://github.com/shitcoderskpi/quote_bot.git
 ```
+
 ## Setting up the environment
 ```bash
 cp infra/.env.example infra/.env
 ```
-Then fill <ins>everything</ins>.
+Then fill <ins>everything blank</ins>.
 
-**P.s:** *Ask if don't know...*
+| Variable     | Description                                                                                                                                            |
+|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `BOT_TOKEN`  | Telegram bot token from [@BotFather](https://t.me/BotFather).                                                                                          |
+| `REDIS_HOST` | Hostname or IP of the Redis instance used as the job queue.                                                                                            |
+| `TEMPLATE`   | Absolute path to the directory containing `.tem` template files inside the generator container. Defaults to `/app/templates` in the Docker image.      |
+| `DPI`        | Output image resolution. Telegram displays stickers at 96 DPI, so higher values produce a sharper image that Telegram then downscales. Default: `300`. |
+| `LOG_PATH`   | Log file directory, relative to each service's working directory (`services/{LOG_PATH}`).                                                              |
 
-**P.P.S.:** *Don't ask, i don't know ... (⌐■_■)*
+**P.s:** *Ask if you don't know...*
 
-## Known Issues
-### Generator service exits with code 139 / Segfaults
-The generator may segfault when CivetWeb workers attempt to close a socket. This can be fixed with the following patch from root of this repo (not from generator dir):
-```bash
-sed -i '/shutdown(conn->client.sock, SHUTDOWN_WR);/c\
-if (conn->client.sock != INVALID_SOCKET) {\
-    closesocket(conn->client.sock);\
-    conn->client.sock = INVALID_SOCKET;\
-}' services/generator/extern/prometheus-cpp/3rdparty/civetweb/src/civetweb.c
-````
+## Generator Service
+The generator is a Rust service (`services/generator`) that receives jobs from a Redis queue, renders quote images via GPU (wgpu + vello), and pushes results back.
 
-> [!NOTE]
-> This fix modifies a submodule, so it cannot be pushed directly.
+### Template format
+Visual appearance is controlled by Minijinja templates in `services/generator/templates/`:
+
+| File        | Theme           |
+|-------------|-----------------|
+| `light.tem` | Light (default) |
+| `dark.tem`  | Dark            |
+
+Each template is a series of COFFIN segments (SVG background + text layers) with Jinja expressions for dynamic values such as dimensions, content, username, and user role colors. The format is documented in [`services/generator/FORMAT.md`](services/generator/FORMAT.md).
