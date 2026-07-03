@@ -56,14 +56,14 @@ pub fn draw_text_layers(
                                 builder.push(StyleProperty::Brush(brush), range.clone());
                             }
                         }
-                        "text_link" | "url" => {
+                        "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" | "phone_number" | "text_mention" => {
                             builder.push(StyleProperty::Underline(true), range.clone());
                             if let Some(c) = &entry.link_color {
                                 let brush = parse_hex_color(c);
                                 builder.push(StyleProperty::Brush(brush), range.clone());
                             }
                         }
-                        "mention" | "bot_command" | "hashtag" | "cashtag" | "email" | "phone_number" | "text_mention" => {
+                        "bot_command" => {
                             if let Some(c) = &entry.link_color {
                                 let brush = parse_hex_color(c);
                                 builder.push(StyleProperty::Brush(brush), range.clone());
