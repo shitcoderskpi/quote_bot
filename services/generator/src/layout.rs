@@ -1,6 +1,6 @@
 use parley::{FontContext, FontFamily, FontWeight, LayoutContext, StyleProperty};
 
-use crate::parser::{parse_entities, TextEntity};
+use crate::parser::TextEntity;
 use crate::templater::{FontSpec, InputMessage, ParsedTemplate};
 
 /// Axis-aligned bounding box for a visual element.
@@ -100,6 +100,7 @@ fn get_text_width(
     font: &FontSpec,
     font_cx: &mut FontContext,
     layout_cx: &mut LayoutContext,
+    entities: Option<&[TextEntity]>,
 ) -> i32 {
     if text.is_empty() {
         return 0;
@@ -110,6 +111,9 @@ fn get_text_width(
     )));
     builder.push_default(StyleProperty::FontSize(font.size * 96.0 / 72.0));
     builder.push_default(StyleProperty::FontWeight(FontWeight::new(font.weight)));
+    if let Some(ents) = entities {
+        apply_layout_entities(&mut builder, ents, text.len());
+    }
     let mut layout: parley::Layout<[u8; 4]> = builder.build(text);
     layout.break_all_lines(None);
     layout.width().ceil() as i32
@@ -168,16 +172,16 @@ pub fn compute_layout(
     let username = msg.username.as_deref().unwrap_or("");
     let status = msg.user_status.as_deref().unwrap_or("");
 
-    // Parse entities once from the input message JSON
-    let entities: Vec<TextEntity> = msg
-        .entities
-        .as_ref()
-        .map(|e| parse_entities(e))
-        .unwrap_or_default();
+    // Parse entities map once from the input message JSON
+    let entities_map = crate::parser::parse_entities_map(msg.entities.as_ref());
+    let entities = entities_map.get("content") .map(|v| v.as_slice());
+    
+    let username_entities = entities_map.get("username").map(|v| v.as_slice());
+    let status_entities = entities_map.get("user_status").map(|v| v.as_slice());
 
     // ── Measure header text widths ──
-    let username_w = get_text_width(username, &username_font, font_cx, layout_cx);
-    let status_w = get_text_width(status, &status_font, font_cx, layout_cx);
+    let username_w = get_text_width(username, &username_font, font_cx, layout_cx, username_entities);
+    let status_w = get_text_width(status, &status_font, font_cx, layout_cx, status_entities);
     let min_header_w = if username_w > 0 || status_w > 0 {
         username_w + status_w + HEADER_GAP
     } else {
@@ -193,7 +197,9 @@ pub fn compute_layout(
     builder.push_default(StyleProperty::FontWeight(FontWeight::new(
         content_font.weight,
     )));
-    apply_layout_entities(&mut builder, &entities, content.len());
+    if let Some(ents) = entities {
+        apply_layout_entities(&mut builder, ents, content.len());
+    }
     let mut text_layout: parley::Layout<[u8; 4]> = builder.build(content);
 
     // First pass: natural width (no wrapping constraint)

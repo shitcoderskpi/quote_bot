@@ -13,7 +13,6 @@ const DEFAULT_FONT_WEIGHT: f32 = 400.0;
 const SVG_BLOCK: u8 = 0;
 const TEXT_BLOCK: u8 = 1;
 const CHAT_ID_BLOCK: u8 = 2;
-const RICH_TEXT_BLOCK: u8 = 3;
 
 #[derive(Deserialize, Debug)]
 pub struct InputMessage {
@@ -50,7 +49,7 @@ impl Default for FontSpec {
 /// A single block in a parsed template file.
 #[derive(Debug)]
 pub struct TemplateBlock {
-    /// Wire-format message type (0=SVG, 1=Text, 3=RichText).
+    /// Wire-format message type (0=SVG, 1=Text, 2=ChatID).
     pub block_type: u8,
     /// The minijinja template body (everything after `type;byte_len;`).
     pub body_template: String,
@@ -80,7 +79,7 @@ fn get_avatar_gradient(grad_id: u64) -> (&'static str, &'static str) {
         warn!("grad_id is not normalized! It will be normalised, but it could lead to rendering artifacts.");
         return AVATAR_GRADIENTS[(grad_id % 7) as usize]
     }
-    AVATAR_GRADIENTS[(grad_id) as usize]
+    AVATAR_GRADIENTS[grad_id as usize]
 }
 
 fn get_avatar_initials(name: &str) -> String {
@@ -124,7 +123,7 @@ impl ParsedTemplate {
             // Extract font spec from text/rich-text blocks.
             // Body fields: x;y;wrap;align;family;size;weight;...
             // Font is at positions 4, 5, 6 within the body.
-            let font = (block_type == TEXT_BLOCK || block_type == RICH_TEXT_BLOCK)
+            let font = (block_type == TEXT_BLOCK)
                 .then(|| {
                     let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
 
@@ -154,8 +153,7 @@ impl ParsedTemplate {
     /// Falls back to default font if no matching block is found.
     pub fn font_for(&self, marker: &str) -> FontSpec {
         for block in &self.blocks {
-            if (block.block_type == TEXT_BLOCK || block.block_type == RICH_TEXT_BLOCK)
-                && block.body_template.contains(marker)
+            if block.block_type == TEXT_BLOCK && block.body_template.contains(marker)
             {
                 if let Some(ref font) = block.font {
                     return font.clone();
@@ -184,9 +182,6 @@ impl ParsedTemplate {
             user_status => msg.user_status.as_deref(),
             user_role => msg.user_role.as_deref().unwrap_or("member"),
             content => msg.content.as_deref().unwrap_or("").trim_end(),
-            entities => msg.entities.as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "[]".to_string()),
             image => msg.image.as_deref().unwrap_or(""),
             avatar_initials => avatar_initials,
             avatar_color_top => avatar_color_top,
@@ -224,7 +219,6 @@ impl ParsedTemplate {
             match block.block_type {
                 SVG_BLOCK => svg.data = rendered,
                 TEXT_BLOCK=> texts.push(parser::parse_text(&rendered)?),
-                RICH_TEXT_BLOCK => texts.push(parser::parse_rich_text(&rendered)?),
                 _ => return Err(format!("Unknown block type: {}", block.block_type).into()),
             }
         }

@@ -21,10 +21,12 @@ fn process_job(
     env: &minijinja::Environment,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // ── Stage 1: Parse input and produce wire-format message ──
-    let (msg, dpi) = if raw.trim_start().starts_with('{') {
+    let (msg, dpi, entities_map) = if raw.trim_start().starts_with('{') {
         // JSON input → template pipeline
         let input_msg: templater::InputMessage = serde_json::from_str(raw)?;
         let msg_dpi = input_msg.dpi;
+        
+        let entities_map = parser::parse_entities_map(input_msg.entities.as_ref());
 
         let theme = input_msg.theme.as_deref().unwrap_or("light");
         let template_name = if theme == "dark" { "dark.tem" } else { "light.tem" };
@@ -36,11 +38,11 @@ fn process_job(
         let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
         let msg = template.build_message(&input_msg, &quote_layout, &env)?;
 
-        (msg, msg_dpi)
+        (msg, msg_dpi, entities_map)
     } else {
         // Raw wire-format input (no template)
         let msg = parser::parse(raw)?;
-        (msg, None)
+        (msg, None, std::collections::HashMap::new())
     };
 
     // ── Stage 2: Build vello scene from SVG ──
@@ -55,7 +57,7 @@ fn process_job(
     let height = size.height().ceil() as u32;
 
     // ── Stage 3: Draw text layers onto scene ──
-    text::draw_text_layers(&mut scene, &msg.texts, font_cx, layout_cx);
+    text::draw_text_layers(&mut scene, &msg.texts, font_cx, layout_cx, &entities_map);
 
     // ── Stage 4: Scale for DPI and rasterize ──
     let dpi = dpi.unwrap_or(cfg.dpi);

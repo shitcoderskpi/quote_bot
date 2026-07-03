@@ -3,7 +3,7 @@ use vello::kurbo::Affine;
 use vello::peniko::{self, Fill};
 use vello::Scene;
 
-use crate::parser::{Alignment, TextMessage};
+use crate::parser::{Alignment, TextEntity, TextMessage};
 
 fn parse_hex_color(s: &str) -> [u8; 4] {
     let s = s.trim_start_matches('#');
@@ -19,6 +19,7 @@ pub fn draw_text_layers(
     texts: &[TextMessage],
     font_cx: &mut FontContext,
     layout_cx: &mut LayoutContext,
+    entities_map: &std::collections::HashMap<String, Vec<crate::parser::TextEntity>>,
 ) {
     for entry in texts {
         let color = parse_hex_color(&entry.color);
@@ -31,38 +32,42 @@ pub fn draw_text_layers(
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(entry.font_weight as f32)));
         builder.push_default(StyleProperty::Brush(color));
 
-        for ent in &entry.entities {
-            let range = ent.offset..(ent.offset + ent.length).min(entry.text.len());
-            match ent.ty.as_str() {
-                "bold" => {
-                    builder.push(StyleProperty::FontWeight(FontWeight::BOLD), range);
-                }
-                "italic" => {
-                    builder.push(StyleProperty::FontStyle(parley::FontStyle::Italic), range);
-                }
-                "underline" => {
-                    builder.push(StyleProperty::Underline(true), range);
-                }
-                "strikethrough" => {
-                    builder.push(StyleProperty::Strikethrough(true), range);
-                }
-                "code" | "pre" => {
-                    builder.push(StyleProperty::FontFamily(FontFamily::Source("monospace".into())), range.clone());
-                    if let Some(c) = &entry.monospace_color {
-                        let brush = parse_hex_color(c);
-                        builder.push(StyleProperty::Brush(brush), range.clone());
+        entry.entities_key.as_ref().and_then(|k| entities_map.get(k)).map(
+            |entities| {
+                for ent in entities {
+                    let range = ent.offset..(ent.offset + ent.length).min(entry.text.len());
+                    match ent.ty.as_str() {
+                        "bold" => {
+                            builder.push(StyleProperty::FontWeight(FontWeight::BOLD), range);
+                        }
+                        "italic" => {
+                            builder.push(StyleProperty::FontStyle(FontStyle::Italic), range);
+                        }
+                        "underline" => {
+                            builder.push(StyleProperty::Underline(true), range);
+                        }
+                        "strikethrough" => {
+                            builder.push(StyleProperty::Strikethrough(true), range);
+                        }
+                        "code" | "pre" => {
+                            builder.push(StyleProperty::FontFamily(FontFamily::Source("monospace".into())), range.clone());
+                            if let Some(c) = &entry.monospace_color {
+                                let brush = parse_hex_color(c);
+                                builder.push(StyleProperty::Brush(brush), range.clone());
+                            }
+                        }
+                        "text_link" | "url" => {
+                            builder.push(StyleProperty::Underline(true), range.clone());
+                            if let Some(c) = &entry.link_color {
+                                let brush = parse_hex_color(c);
+                                builder.push(StyleProperty::Brush(brush), range.clone());
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                "text_link" | "url" => {
-                    builder.push(StyleProperty::Underline(true), range.clone());
-                    if let Some(c) = &entry.link_color {
-                        let brush = parse_hex_color(c);
-                        builder.push(StyleProperty::Brush(brush), range.clone());
-                    }
-                }
-                _ => {}
             }
-        }
+        ).unwrap();
 
         let mut layout: Layout<[u8; 4]> = builder.build(&entry.text);
 

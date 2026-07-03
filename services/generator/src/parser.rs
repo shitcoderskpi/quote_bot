@@ -46,8 +46,8 @@ pub struct TextMessage {
     pub bg_color: Option<String>,
     pub monospace_color: Option<String>,
     pub link_color: Option<String>,
+    pub entities_key: Option<String>,
     pub text: String,
-    pub entities: Vec<TextEntity>,
 }
 
 #[derive(Debug)]
@@ -133,6 +133,18 @@ pub fn parse_entities(json_val: &serde_json::Value) -> Vec<TextEntity> {
     entities
 }
 
+pub fn parse_entities_map(json: Option<&serde_json::Value>) -> std::collections::HashMap<String, Vec<TextEntity>> {
+    let mut map = std::collections::HashMap::new();
+    if let Some(val) = json {
+        if let Some(obj) = val.as_object() {
+            for (k, v) in obj {
+                map.insert(k.clone(), parse_entities(v));
+            }
+        }
+    }
+    map
+}
+
 pub(crate) fn parse_text(mut data: &str) -> Result<TextMessage, ParseError> {
     let x = parse_int(read_until(&mut data, ';')?)?;
     let y = parse_int(read_until(&mut data, ';')?)?;
@@ -145,40 +157,39 @@ pub(crate) fn parse_text(mut data: &str) -> Result<TextMessage, ParseError> {
     let font_size = parse_float(read_until(&mut data, ';')?)?;
     let font_weight = parse_int(read_until(&mut data, ';')?)?;
     let color = read_until(&mut data, ';')?.to_string();
+    
     let bg_color = match read_until(&mut data, ';') {
         Ok(c) => Some(c.to_string()),
         Err(_) => None,
     };
     let bg_color = bg_color.filter(|s| !s.is_empty());
     
+    let monospace_color = match read_until(&mut data, ';') {
+        Ok(c) => Some(c.to_string()),
+        Err(_) => None,
+    };
+    let monospace_color = monospace_color.filter(|s| !s.is_empty());
+    
+    let link_color = match read_until(&mut data, ';') {
+        Ok(c) => Some(c.to_string()),
+        Err(_) => None,
+    };
+    let link_color = link_color.filter(|s| !s.is_empty());
+    
+    let entities_key = match read_until(&mut data, ';') {
+        Ok(c) => Some(c.to_string()),
+        Err(_) => None,
+    };
+    let entities_key = entities_key.filter(|s| !s.is_empty());
+
     let text = data.to_string();
 
-    Ok(TextMessage { x, y, wrap_width, alignment, valignment, font_family, font_size, font_weight, color, bg_color, monospace_color: None, link_color: None, text, entities: vec![] })
-}
-
-pub(crate) fn parse_rich_text(mut data: &str) -> Result<TextMessage, ParseError> {
-    let x = parse_int(read_until(&mut data, ';')?)?;
-    let y = parse_int(read_until(&mut data, ';')?)?;
-    let wrap_width = parse_int(read_until(&mut data, ';')?)?;
-
-    let align_val = parse_int::<i32>(read_until(&mut data, ';')?)?;
-    let (alignment, valignment) = parse_alignment(align_val);
-
-    let font_family = read_until(&mut data, ';')?.to_string();
-    let font_size = parse_float(read_until(&mut data, ';')?)?;
-    let font_weight = parse_int(read_until(&mut data, ';')?)?;
-    let color = read_until(&mut data, ';')?.to_string();
-    let monospace_color = read_until(&mut data, ';')?.to_string();
-    let link_color = read_until(&mut data, ';')?.to_string();
-    
-    let entities_str = read_until(&mut data, ';')?;
-    let text = data.to_string();
-    
-    let entities = serde_json::from_str::<serde_json::Value>(entities_str)
-        .map(|val| parse_entities(&val))
-        .unwrap_or_default();
-
-    Ok(TextMessage { x, y, wrap_width, alignment, valignment, font_family, font_size, font_weight, color, bg_color: None, monospace_color: Some(monospace_color), link_color: Some(link_color), text, entities })
+    Ok(TextMessage {
+        x, y, wrap_width, alignment, valignment,
+        font_family, font_size, font_weight,
+        color, bg_color, monospace_color, link_color,
+        entities_key, text,
+    })
 }
 
 pub fn parse(mut input: &str) -> Result<ParsedMessage, ParseError> {
@@ -210,7 +221,6 @@ pub fn parse(mut input: &str) -> Result<ParsedMessage, ParseError> {
             0 => msg.svg = SvgMessage { data: data.to_string() },
             1 => msg.texts.push(parse_text(data)?),
             2 => msg.header = data.to_string(),
-            3 => msg.texts.push(parse_rich_text(data)?),
             t => return Err(ParseError::UnknownType(t)),
         }
     }
