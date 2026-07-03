@@ -133,7 +133,7 @@ pub fn parse_entities(json_val: &serde_json::Value) -> Vec<TextEntity> {
     entities
 }
 
-fn parse_text(mut data: &str) -> Result<TextMessage, ParseError> {
+pub(crate) fn parse_text(mut data: &str) -> Result<TextMessage, ParseError> {
     let x = parse_int(read_until(&mut data, ';')?)?;
     let y = parse_int(read_until(&mut data, ';')?)?;
     let wrap_width = parse_int(read_until(&mut data, ';')?)?;
@@ -156,7 +156,7 @@ fn parse_text(mut data: &str) -> Result<TextMessage, ParseError> {
     Ok(TextMessage { x, y, wrap_width, alignment, valignment, font_family, font_size, font_weight, color, bg_color, monospace_color: None, link_color: None, text, entities: vec![] })
 }
 
-fn parse_rich_text(mut data: &str) -> Result<TextMessage, ParseError> {
+pub(crate) fn parse_rich_text(mut data: &str) -> Result<TextMessage, ParseError> {
     let x = parse_int(read_until(&mut data, ';')?)?;
     let y = parse_int(read_until(&mut data, ';')?)?;
     let wrap_width = parse_int(read_until(&mut data, ';')?)?;

@@ -1,7 +1,18 @@
 use serde::Deserialize;
 use minijinja::Environment;
-
+use tracing::error;
+use vello_svg::usvg::ImageKind::SVG;
 use crate::layout::QuoteLayout;
+use crate::parser::{self, ParsedMessage, SvgMessage};
+
+const DEFAULT_FONT_FAMILY: &str = "sans-serif";
+const DEFAULT_FONT_SIZE: f32 = 15.0;
+const DEFAULT_FONT_WEIGHT: f32 = 400.0;
+
+const SVG_BLOCK: u8 = 0;
+const TEXT_BLOCK: u8 = 1;
+const CHAT_ID_BLOCK: u8 = 2;
+const RICH_TEXT_BLOCK: u8 = 3;
 
 #[derive(Deserialize, Debug)]
 pub struct InputMessage {
@@ -27,9 +38,9 @@ pub struct FontSpec {
 impl Default for FontSpec {
     fn default() -> Self {
         Self {
-            family: "sans-serif".to_string(),
-            size: 15.0,
-            weight: 400.0,
+            family: DEFAULT_FONT_FAMILY.to_string(),
+            size: DEFAULT_FONT_SIZE,
+            weight: DEFAULT_FONT_WEIGHT,
         }
     }
 }
@@ -38,7 +49,7 @@ impl Default for FontSpec {
 #[derive(Debug)]
 pub struct TemplateBlock {
     /// Wire-format message type (0=SVG, 1=Text, 3=RichText).
-    pub block_type: i32,
+    pub block_type: u8,
     /// The minijinja template body (everything after `type;byte_len;`).
     pub body_template: String,
     /// Pre-extracted font info for text/rich-text blocks.
@@ -69,7 +80,7 @@ impl ParsedTemplate {
                 continue;
             }
 
-            let block_type: i32 = match parts[0].trim().parse() {
+            let block_type: u8 = match parts[0].trim().parse() {
                 Ok(t) => t,
                 Err(_) => continue,
             };
@@ -78,20 +89,21 @@ impl ParsedTemplate {
             // Extract font spec from text/rich-text blocks.
             // Body fields: x;y;wrap;align;family;size;weight;...
             // Font is at positions 4, 5, 6 within the body.
-            let font = if block_type == 1 || block_type == 3 {
-                let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
-                if body_parts.len() >= 7 {
-                    Some(FontSpec {
-                        family: body_parts[4].trim().to_string(),
-                        size: body_parts[5].trim().parse().unwrap_or(15.0),
-                        weight: body_parts[6].trim().parse().unwrap_or(400.0),
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let font = (block_type == TEXT_BLOCK || block_type == RICH_TEXT_BLOCK)
+                .then(|| {
+                    let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
+
+                    if body_parts.len() >= 7 {
+                        Some(FontSpec {
+                            family: body_parts[4].trim().to_string(),
+                            size: body_parts[5].trim().parse().unwrap_or(DEFAULT_FONT_SIZE),
+                            weight: body_parts[6].trim().parse().unwrap_or(DEFAULT_FONT_WEIGHT),
+                        })
+                    } else {
+                        error!("Error: Invalid body_template format. Expected at least 7 parts, found {}", body_parts.len());
+                        None
+                    }
+                }).flatten();
 
             blocks.push(TemplateBlock {
                 block_type,
@@ -107,7 +119,7 @@ impl ParsedTemplate {
     /// Falls back to default font if no matching block is found.
     pub fn font_for(&self, marker: &str) -> FontSpec {
         for block in &self.blocks {
-            if (block.block_type == 1 || block.block_type == 3)
+            if (block.block_type == TEXT_BLOCK || block.block_type == RICH_TEXT_BLOCK)
                 && block.body_template.contains(marker)
             {
                 if let Some(ref font) = block.font {
@@ -118,15 +130,13 @@ impl ParsedTemplate {
         FontSpec::default()
     }
 
-    /// Render all template blocks into wire-format payload string.
-    /// Prepends the header block (type 2) and renders each template block
-    /// with the given input message and computed layout.
-    pub fn render(
+    /// Build a ParsedMessage directly without going through COFFIN.
+    pub fn build_message(
         &self,
         msg: &InputMessage,
         layout: &QuoteLayout,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let env = Environment::new();
+        env: &Environment,
+    ) -> Result<ParsedMessage, Box<dyn std::error::Error>> {
 
         let ctx = minijinja::context! {
             // Content variables
@@ -148,19 +158,13 @@ impl ParsedTemplate {
             wrap_width => layout.wrap_width,
         };
 
-        let mut payload = String::new();
+        let mut svg = SvgMessage { data: String::new() };
+        let mut texts = Vec::new();
 
-        // Header block (type 2)
-        let header_str = msg.header.as_ref()
+        let header = msg.header.as_ref()
             .map(|h| h.to_string())
             .unwrap_or_else(|| "{}".to_string());
-        payload.push_str("2;");
-        payload.push_str(&header_str.len().to_string());
-        payload.push(';');
-        payload.push_str(&header_str);
-        payload.push(',');
 
-        // Template blocks
         for block in &self.blocks {
             if msg.user_status.is_none() && block.body_template.contains("user_status") {
                 continue;
@@ -168,14 +172,18 @@ impl ParsedTemplate {
 
             let rendered = env.render_str(&block.body_template, &ctx)?;
 
-            payload.push_str(&block.block_type.to_string());
-            payload.push(';');
-            payload.push_str(&rendered.len().to_string());
-            payload.push(';');
-            payload.push_str(&rendered);
-            payload.push(',');
+            match block.block_type {
+                SVG_BLOCK => svg.data = rendered,
+                TEXT_BLOCK=> texts.push(parser::parse_text(&rendered)?),
+                RICH_TEXT_BLOCK => texts.push(parser::parse_rich_text(&rendered)?),
+                _ => return Err(format!("Unknown block type: {}", block.block_type).into()),
+            }
         }
 
-        Ok(payload)
+        Ok(ParsedMessage {
+            header,
+            svg,
+            texts,
+        })
     }
 }
