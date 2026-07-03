@@ -11,12 +11,22 @@
 
   <circle cx="19" cy="{{ bubble_height - 17 }}" r="18" fill="#ddd" />
 
+  {% if image %}
   <image
     href="data:image/jpeg;base64,{{ image }}"
     x="1" y="{{ bubble_height - 35 }}"
     width="36" height="36"
     clip-path="url(#circle-clip)"
   />
+  {% else %}
+  <defs>
+    <linearGradient id="avatar-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="{{ avatar_color_top }}" />
+      <stop offset="100%" stop-color="{{ avatar_color_bottom }}" />
+    </linearGradient>
+  </defs>
+  <circle cx="19" cy="{{ bubble_height - 17 }}" r="18" fill="url(#avatar-grad)" />
+  {% endif %}
 
   <g filter="url(#shadow)">
     <path d="
@@ -37,3 +47,4 @@
 1;{{byte_len}};56;27;0;10;sans-serif;15.0;700;#4CA635;;{{ username }},
 1;{{byte_len}};56;27;{{wrap_width}};12;sans-serif;13.0;400;{%- if user_role == "creator" -%}#A682D1{%- elif user_role == "administrator" -%}#58AB63{%- else -%}#21212166{%- endif -%};{%- if user_role == "creator" -%}#A682D122{%- elif user_role == "administrator" -%}#58AB6322{%- endif -%};{{ user_status }},
 3;{{byte_len}};56;32;{{wrap_width}};0;sans-serif;15.0;400;#000000;#64AA7C;#3199CF;{{ entities }};{{ content }},
+1;{{byte_len}};1;{{ bubble_height - 27 }};36;1;sans-serif;14.0;700;#FFFFFF;;{{ avatar_initials }},
