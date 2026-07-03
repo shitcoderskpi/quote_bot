@@ -63,11 +63,17 @@ pub fn draw_text_layers(
                                 builder.push(StyleProperty::Brush(brush), range.clone());
                             }
                         }
+                        "mention" | "bot_command" | "hashtag" | "cashtag" | "email" | "phone_number" | "text_mention" => {
+                            if let Some(c) = &entry.link_color {
+                                let brush = parse_hex_color(c);
+                                builder.push(StyleProperty::Brush(brush), range.clone());
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
-        ).unwrap();
+        ).unwrap_or(());
 
         let mut layout: Layout<[u8; 4]> = builder.build(&entry.text);
 

@@ -43,7 +43,7 @@ class SerializableMessage:
     user_status: str | None
     user_role: str | None
     content: str
-    entities: list
+    entities: dict
     image: BytesIO
     header: dict
     dpi: int | None = None
@@ -99,6 +99,13 @@ def convert_entities(text: str, entities) -> list:
             "pre",
             "text_link",
             "url",
+            "mention",
+            "bot_command",
+            "hashtag",
+            "cashtag",
+            "email",
+            "phone_number",
+            "text_mention",
         ):
             continue
 
@@ -174,7 +181,7 @@ async def command_quote_handler(message: Message, command: CommandObject) -> Non
         get_member_custom_title(member),
         user_role,
         reply.text or "",
-        converted_entities,
+        {"content": converted_entities},
         avatar,
         msg_header,
         dpi,
