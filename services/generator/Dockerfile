@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     cmake \
     make \
+    clang \
+    mold \
     && rm -rf /var/lib/apt/lists/*
 
 # Cache dependencies first
