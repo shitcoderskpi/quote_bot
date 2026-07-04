@@ -26,13 +26,13 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 WORKDIR /app
 
+# TODO: maybe consider using other fonts (like Inter ot similar) so Apple won't be a problem. Just in case
 RUN apt-get update && apt-get install -y --no-install-recommends \
     mesa-vulkan-drivers \
     fontconfig \
     fonts-noto-color-emoji \
     git \
     ca-certificates \
-    # TODO: maybe consider to repack these to png, or use other fonts (like Inter ot similar) so Apple won't be a problem. Just in case \
     && git clone https://github.com/sahibjotsaggu/San-Francisco-Pro-Fonts.git /tmp/sf-pro \
     && git clone https://github.com/supercomputra/SF-Mono-Font.git /tmp/sf-mono \
     && apt-get purge -y fonts-dejavu-core fonts-dejavu \
