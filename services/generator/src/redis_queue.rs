@@ -18,12 +18,9 @@ impl RedisQueue {
     }
 
     pub async fn dequeue(&mut self, queue: String, timeout: f64) -> Result<Option<Vec<u8>>, RedisError> {
-        let client = self.client.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = client.get_connection()?;
-            let result: Option<(String, Vec<u8>)> = conn.brpop(&queue, timeout)?;
-            Ok(result.map(|(_key, payload)| payload))
-        }).await.unwrap()
+        let mut conn = self.client.get_connection()?;
+        let result: Option<(String, Vec<u8>)> = conn.brpop(&queue, timeout)?;
+        Ok(result.map(|(_key, payload)| payload))
     }
 
     pub async fn enqueue(&mut self, queue: &str, payload: Vec<u8>) -> Result<(), RedisError> {

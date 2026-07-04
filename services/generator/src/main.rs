@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use vello::kurbo::Affine;
@@ -12,6 +14,8 @@ mod renderer;
 mod templater;
 mod text;
 
+const DEFAULT_DPI_NORMIES_USE: f64 = 96.0;
+
 fn process_job(
     raw: &str,
     cfg: &config::Config,
@@ -21,35 +25,25 @@ fn process_job(
     env: &minijinja::Environment,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // ── Stage 1: Parse input and produce wire-format message ──
-    let (msg, dpi) = if raw.trim_start().starts_with('{') {
-        // JSON input → template pipeline
-        let input_msg: templater::InputMessage = serde_json::from_str(raw)?;
-        let msg_dpi = input_msg.dpi;
+    // JSON input → template pipeline
+    let input_msg: templater::InputMessage = serde_json::from_str(raw)?;
 
-        let theme = input_msg.theme.as_deref().unwrap_or("light");
-        let template_name = if theme == "dark" { "dark.tem" } else { "light.tem" };
-        let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
-        let template_str = std::fs::read_to_string(&template_path)?;
+    let theme = input_msg.theme.as_deref().unwrap_or("light");
+    let template_name = if theme == "dark" { "dark.tem" } else { "light.tem" };
+    let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
+    let template_str = std::fs::read_to_string(&template_path)?;
 
-        // Parse template once — used for both font lookups and rendering
-        let template = templater::ParsedTemplate::parse(&template_str);
-        let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
-        let msg = template.build_message(&input_msg, &quote_layout, &env)?;
-
-        (msg, msg_dpi)
-    } else {
-        // Raw wire-format input (no template)
-        let msg = parser::parse(raw)?;
-        (msg, None)
-    };
+    // Parse template once — used for both font lookups and rendering
+    let template = templater::ParsedTemplate::parse(&template_str);
+    let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
+    let msg = template.build_message(&input_msg, &quote_layout, &env)?;
 
     // ── Stage 2: Build vello scene from SVG ──
-    let mut scene = vello_svg::render(&msg.svg.data)?;
-
     let tree = vello_svg::usvg::Tree::from_str(
         &msg.svg.data,
         &vello_svg::usvg::Options::default(),
     )?;
+    let mut scene = vello_svg::render_tree(&tree);
     let size = tree.size();
     let width = size.width().ceil() as u32;
     let height = size.height().ceil() as u32;
@@ -58,8 +52,8 @@ fn process_job(
     text::draw_text_layers(&mut scene, &msg.texts, font_cx, layout_cx);
 
     // ── Stage 4: Scale for DPI and rasterize ──
-    let dpi = dpi.unwrap_or(cfg.dpi);
-    let scale = dpi as f64 / 96.0;
+    let dpi = input_msg.dpi.unwrap_or(cfg.dpi);
+    let scale = dpi as f64 / DEFAULT_DPI_NORMIES_USE;
     let mut scaled_scene = Scene::new();
     scaled_scene.append(&scene, Some(Affine::scale(scale)));
 
@@ -77,7 +71,6 @@ fn process_job(
     img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
 
     // ── Stage 6: Build result JSON, compress, return ──
-    use base64::prelude::*;
     let b64_img = BASE64_STANDARD.encode(webp_data.into_inner());
     let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, msg.header, b64_img);
 
@@ -114,6 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut font_cx = parley::FontContext::new();
     let mut layout_cx = parley::LayoutContext::new();
+    let env = minijinja::Environment::new();
 
     loop {
         let payload = match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
@@ -133,7 +127,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let env = minijinja::Environment::new();
         match process_job(&raw, &cfg, &mut render_ctx, &mut font_cx, &mut layout_cx, &env) {
             Ok(result) => {
                 if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {

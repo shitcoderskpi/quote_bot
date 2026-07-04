@@ -2,7 +2,6 @@ use serde::Deserialize;
 use minijinja::Environment;
 use tracing::warn;
 use tracing::error;
-use vello_svg::usvg::ImageKind::SVG;
 use crate::layout::QuoteLayout;
 use crate::parser::{self, ParsedMessage, SvgMessage};
 
