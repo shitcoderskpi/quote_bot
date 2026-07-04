@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
-use vello::wgpu;
-use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
+use vello_svg::vello::wgpu;
+use vello_svg::vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
 
 pub struct RenderContext {
     device: wgpu::Device,
@@ -64,7 +64,7 @@ impl RenderContext {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let params = RenderParams {
-            base_color: vello::peniko::Color::TRANSPARENT,
+            base_color: vello_svg::vello::peniko::Color::TRANSPARENT,
             width,
             height,
             antialiasing_method: AaConfig::Area,

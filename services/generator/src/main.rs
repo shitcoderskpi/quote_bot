@@ -1,8 +1,5 @@
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use vello::kurbo::Affine;
-use vello::Scene;
-
 mod compressor;
 mod config;
 mod layout;
@@ -60,8 +57,8 @@ fn process_job(
     // ── Stage 4: Scale for DPI and rasterize ──
     let dpi = dpi.unwrap_or(cfg.dpi);
     let scale = dpi as f64 / 96.0;
-    let mut scaled_scene = Scene::new();
-    scaled_scene.append(&scene, Some(Affine::scale(scale)));
+    let mut scaled_scene = vello_svg::vello::Scene::new();
+    scaled_scene.append(&scene, Some(vello_svg::vello::kurbo::Affine::scale(scale)));
 
     let scaled_width = (width as f64 * scale).ceil() as u32;
     let scaled_height = (height as f64 * scale).ceil() as u32;
