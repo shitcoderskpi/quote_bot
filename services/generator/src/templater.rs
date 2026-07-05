@@ -1,238 +1,434 @@
-use serde::Deserialize;
-use minijinja::Environment;
-use tracing::warn;
-use tracing::error;
-use vello_svg::usvg::ImageKind::SVG;
-use crate::layout::QuoteLayout;
-use crate::parser::{self, ParsedMessage, SvgMessage};
+use crate::primitives::node::{Content, Node, Style};
+use crate::primitives::paint::{Paint, Stop};
+use crate::primitives::shape::ShapeKind;
+use crate::primitives::text::{RichText, Span, TextAlign};
+use parley::FontWeight;
+use steel::steel_vm::engine::Engine;
+use steel::rvals::SteelVal;
+use std::collections::HashMap;
+use steel::steel_vm::register_fn::RegisterFn;
+use taffy::prelude::*;
 
-const DEFAULT_FONT_FAMILY: &str = "sans-serif";
-const DEFAULT_FONT_SIZE: f32 = 15.0;
-const DEFAULT_FONT_WEIGHT: f32 = 400.0;
-
-const SVG_BLOCK: u8 = 0;
-const TEXT_BLOCK: u8 = 1;
-const CHAT_ID_BLOCK: u8 = 2;
-const RICH_TEXT_BLOCK: u8 = 3;
-
-#[derive(Deserialize, Debug)]
-pub struct InputMessage {
-    pub header: Option<serde_json::Value>,
-    pub entities: Option<serde_json::Value>,
-    pub grad_id: Option<u64>,
-    pub username: Option<String>,
-    pub user_status: Option<String>,
-    pub user_role: Option<String>,
-    pub content: Option<String>,
-    pub image: Option<String>,
-    pub dpi: Option<f32>,
-    pub theme: Option<String>,
+pub struct Templater {
+    engine: Engine,
 }
 
-/// Font specification extracted from a template text block.
-#[derive(Debug, Clone)]
-pub struct FontSpec {
-    pub family: String,
-    pub size: f32,
-    pub weight: f32,
+impl Templater {
+    pub fn new() -> Self {
+        let mut engine = Engine::new();
+        engine.register_fn("string-byte-length", |s: String| s.len());
+        Self { engine }
+    }
+
+    pub fn render_template(&mut self, template_src: &str, payload_json: &str) -> Result<Node, Box<dyn std::error::Error>> {
+        let payload_val: serde_json::Value = serde_json::from_str(payload_json)?;
+        let assoc_str = json_to_scheme(&payload_val);
+
+        let script = format!(
+            "(define payload {})\n{}",
+            assoc_str, template_src
+        );
+
+        let res = self.engine.compile_and_run_raw_program(script)?;
+        let last_val = res.last().ok_or("Template returned no value")?;
+        
+        parse_node(last_val)
+    }
 }
 
-impl Default for FontSpec {
-    fn default() -> Self {
-        Self {
-            family: DEFAULT_FONT_FAMILY.to_string(),
-            size: DEFAULT_FONT_SIZE,
-            weight: DEFAULT_FONT_WEIGHT,
+fn json_to_scheme(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::Null => "'()".to_string(),
+        serde_json::Value::Bool(b) => if *b { "#t".to_string() } else { "#f".to_string() },
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => format!("\"{}\"", s.replace("\"", "\\\"")),
+        serde_json::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(json_to_scheme).collect();
+            format!("(list {})", items.join(" "))
+        }
+        serde_json::Value::Object(obj) => {
+            let items: Vec<String> = obj.iter().map(|(k, v)| {
+                format!("(cons '{} {})", k, json_to_scheme(v))
+            }).collect();
+            format!("(list {})", items.join(" "))
         }
     }
 }
 
-/// A single block in a parsed template file.
-#[derive(Debug)]
-pub struct TemplateBlock {
-    /// Wire-format message type (0=SVG, 1=Text, 3=RichText).
-    pub block_type: u8,
-    /// The minijinja template body (everything after `type;byte_len;`).
-    pub body_template: String,
-    /// Pre-extracted font info for text/rich-text blocks.
-    pub font: Option<FontSpec>,
-}
-
-/// A parsed template file, ready for font lookups and rendering.
-/// Created once per template and reused for layout computation and payload generation.
-#[derive(Debug)]
-pub struct ParsedTemplate {
-    pub blocks: Vec<TemplateBlock>,
-}
-
-const AVATAR_GRADIENTS: &[(&str, &str)] = &[
-    ("#FF885E", "#FF516A"), // Red
-    ("#FFCD6A", "#FFA85C"), // Orange
-    ("#82B1FF", "#665FFF"), // Violet
-    ("#A0DE7E", "#54CB68"), // Green
-    ("#53EDD6", "#28C9B7"), // Cyan
-    ("#72D5FD", "#2A9EF1"), // Blue
-    ("#E0A2F3", "#D669ED"), // Pink
-];
-
-fn get_avatar_gradient(grad_id: u64) -> (&'static str, &'static str) {
-    if grad_id >= 7 {
-        warn!("grad_id is not normalized! It will be normalised, but it could lead to rendering artifacts.");
-        return AVATAR_GRADIENTS[(grad_id % 7) as usize]
-    }
-    AVATAR_GRADIENTS[(grad_id) as usize]
-}
-
-fn get_avatar_initials(name: &str) -> String {
-    let mut initials = String::new();
-    let mut words = name.split_whitespace();
-    for _ in 0..2 {
-        if let Some(word) = words.next() {
-            if let Some(c) = word.chars().next() {
-                for uc in c.to_uppercase() {
-                    initials.push(uc);
+fn get_field<'a>(val: &'a SteelVal, key: &str) -> Option<&'a SteelVal> {
+    if let SteelVal::HashMapV(map) = val {
+        for (k, v) in map.iter() {
+            if let SteelVal::SymbolV(ks) = k {
+                if ks.as_str() == key {
+                    return Some(v);
                 }
             }
         }
     }
-    initials
+    None
 }
 
-impl ParsedTemplate {
-    /// Parse a template file into structured blocks.
-    /// Extracts font specs from text blocks (type 1 and 3) at parse time.
-    pub fn parse(template_str: &str) -> Self {
-        let mut blocks = Vec::new();
+fn parse_f64(val: &SteelVal) -> Option<f64> {
+    match val {
+        SteelVal::IntV(i) => Some(*i as f64),
+        SteelVal::NumV(f) => Some(*f),
+        _ => None,
+    }
+}
 
-        for raw_block in template_str.split(",\n") {
-            let raw_block = raw_block.trim_end_matches(',');
-            if raw_block.is_empty() {
-                continue;
+fn parse_dimension(val: &SteelVal) -> Dimension {
+    if let SteelVal::SymbolV(s) = val {
+        if s.as_str() == "auto" { return Dimension::auto(); }
+    }
+    if let SteelVal::ListV(list) = val {
+        if let (Some(SteelVal::SymbolV(unit)), Some(num)) = (list.get(0), list.get(1)) {
+            if let Some(v) = parse_f64(num) {
+                if unit.as_str() == "px" { return Dimension::length(v as f32); }
+                if unit.as_str() == "pct" { return Dimension::percent((v / 100.0) as f32); }
             }
+        }
+    }
+    Dimension::auto()
+}
 
-            let parts: Vec<&str> = raw_block.splitn(3, ';').collect();
-            if parts.len() < 3 {
-                continue;
+fn parse_length_percentage(val: &SteelVal) -> LengthPercentage {
+    if let SteelVal::ListV(list) = val {
+        if let (Some(SteelVal::SymbolV(unit)), Some(num)) = (list.get(0), list.get(1)) {
+            if let Some(v) = parse_f64(num) {
+                if unit.as_str() == "px" { return LengthPercentage::length(v as f32); }
+                if unit.as_str() == "pct" { return LengthPercentage::percent((v / 100.0) as f32); }
             }
+        }
+    }
+    LengthPercentage::length(0.0)
+}
 
-            let block_type: u8 = match parts[0].trim().parse() {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            let body_template = parts[2].to_string();
+fn parse_length_percentage_auto(val: &SteelVal) -> LengthPercentageAuto {
+    if let SteelVal::SymbolV(s) = val {
+        if s.as_str() == "auto" { return LengthPercentageAuto::auto(); }
+    }
+    if let SteelVal::ListV(list) = val {
+        if let (Some(SteelVal::SymbolV(unit)), Some(num)) = (list.get(0), list.get(1)) {
+            if let Some(v) = parse_f64(num) {
+                if unit.as_str() == "px" { return LengthPercentageAuto::length(v as f32); }
+                if unit.as_str() == "pct" { return LengthPercentageAuto::percent((v / 100.0) as f32); }
+            }
+        }
+    }
+    LengthPercentageAuto::auto()
+}
 
-            // Extract font spec from text/rich-text blocks.
-            // Body fields: x;y;wrap;align;family;size;weight;...
-            // Font is at positions 4, 5, 6 within the body.
-            let font = (block_type == TEXT_BLOCK || block_type == RICH_TEXT_BLOCK)
-                .then(|| {
-                    let body_parts: Vec<&str> = body_template.splitn(8, ';').collect();
-
-                    if body_parts.len() >= 7 {
-                        Some(FontSpec {
-                            family: body_parts[4].trim().to_string(),
-                            size: body_parts[5].trim().parse().unwrap_or(DEFAULT_FONT_SIZE),
-                            weight: body_parts[6].trim().parse().unwrap_or(DEFAULT_FONT_WEIGHT),
-                        })
-                    } else {
-                        error!("Error: Invalid body_template format. Expected at least 7 parts, found {}", body_parts.len());
-                        None
+fn parse_color(val: &SteelVal) -> Option<vello::peniko::Color> {
+    if let SteelVal::ListV(list) = val {
+        if let Some(SteelVal::SymbolV(kind)) = list.get(0) {
+            match kind.as_str() {
+                "rgb" => {
+                    let r = parse_f64(list.get(1)?)? as u8;
+                    let g = parse_f64(list.get(2)?)? as u8;
+                    let b = parse_f64(list.get(3)?)? as u8;
+                    return Some(vello::peniko::Color::from_rgb8(r, g, b))
+                }
+                "rgba" => {
+                    let r = parse_f64(list.get(1)?)? as u8;
+                    let g = parse_f64(list.get(2)?)? as u8;
+                    let b = parse_f64(list.get(3)?)? as u8;
+                    let a = parse_f64(list.get(4)?)? as u8;
+                    return Some(vello::peniko::Color::from_rgba8(r, g, b, a));
+                }
+                "hex" => {
+                    if let Some(SteelVal::StringV(hex_str)) = list.get(1) {
+                        return parse_hex(hex_str.as_str());
                     }
-                }).flatten();
-
-            blocks.push(TemplateBlock {
-                block_type,
-                body_template,
-                font,
-            });
+                }
+                _ => {}
+            }
         }
+    }
+    None
+}
 
-        ParsedTemplate { blocks }
+fn parse_hex(hex: &str) -> Option<vello::peniko::Color> {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() == 6 || hex.len() == 8 {
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        let a = if hex.len() == 8 {
+            u8::from_str_radix(&hex[6..8], 16).ok()?
+        } else {
+            255
+        };
+        Some(vello::peniko::Color::from_rgba8(r, g, b, a))
+    } else {
+        None
+    }
+}
+
+fn parse_paint(val: &SteelVal) -> Option<Paint> {
+    if let SteelVal::ListV(list) = val {
+        if let Some(SteelVal::SymbolV(kind)) = list.get(0) {
+            if kind.as_str() == "solid" {
+                if let Some(color) = parse_color(list.get(1)?) {
+                    return Some(Paint::Solid(color));
+                }
+            } else if kind.as_str() == "linear-gradient" {
+                let top_color = parse_color(list.get(1)?)?;
+                let bottom_color = parse_color(list.get(2)?)?;
+                return Some(Paint::LinearGradient {
+                    start: vello::kurbo::Point::new(0.0, 0.0).into(),
+                    end: vello::kurbo::Point::new(0.0, 1.0).into(),
+                    stops: vec![
+                        Stop { offset: 0.0, color: top_color },
+                        Stop { offset: 1.0, color: bottom_color },
+                    ],
+                    extend: Default::default(),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn parse_length_f64(val: &SteelVal) -> Option<f64> {
+    if let SteelVal::ListV(list) = val {
+        if let (Some(SteelVal::SymbolV(unit)), Some(num)) = (list.get(0), list.get(1)) {
+            if unit.as_str() == "px" || unit.as_str() == "pct" {
+                return parse_f64(num);
+            }
+        }
+    }
+    parse_f64(val)
+}
+
+fn parse_corners(val: &SteelVal) -> crate::primitives::shape::Corners {
+    if let Some(l_val) = get_field(val, "all") {
+        if let Some(l) = parse_length_f64(l_val) {
+            return crate::primitives::shape::Corners::all(l);
+        }
+    }
+    let mut corners = crate::primitives::shape::Corners::zero();
+    if let Some(v) = get_field(val, "top_left").and_then(parse_length_f64) { corners.top_left = v; }
+    if let Some(v) = get_field(val, "top_right").and_then(parse_length_f64) { corners.top_right = v; }
+    if let Some(v) = get_field(val, "bottom_right").and_then(parse_length_f64) { corners.bottom_right = v; }
+    if let Some(v) = get_field(val, "bottom_left").and_then(parse_length_f64) { corners.bottom_left = v; }
+    corners
+}
+
+fn parse_shape_kind(val: &SteelVal) -> Option<ShapeKind> {
+    if let Some(rect) = get_field(val, "rect") {
+        let corners = get_field(rect, "corners").map(parse_corners).unwrap_or(crate::primitives::shape::Corners::zero());
+        return Some(ShapeKind::Rect { corners });
+    }
+    if let Some(_circle) = get_field(val, "circle") {
+        return Some(ShapeKind::Circle);
+    }
+    if let Some(path) = get_field(val, "path") {
+        if let Some(SteelVal::StringV(data)) = get_field(path, "data") {
+            return Some(ShapeKind::Path { data: data.to_string() });
+        }
+    }
+    None
+}
+
+fn parse_style(val: &SteelVal) -> Style {
+    let mut style = Style::default();
+    
+    // Taffy layout mapping
+    if let Some(SteelVal::SymbolV(display)) = get_field(val, "display") {
+        style.layout.display = match display.as_str() {
+            "none" => Display::None,
+            _ => Display::Flex,
+        };
+    }
+    
+    if let Some(SteelVal::SymbolV(dir)) = get_field(val, "flex_direction") {
+        style.layout.flex_direction = match dir.as_str() {
+            "row" => FlexDirection::Row,
+            "column" => FlexDirection::Column,
+            "row-reverse" => FlexDirection::RowReverse,
+            "column-reverse" => FlexDirection::ColumnReverse,
+            _ => FlexDirection::Row,
+        };
+    }
+    
+    if let Some(SteelVal::SymbolV(align)) = get_field(val, "align_items") {
+        style.layout.align_items = match align.as_str() {
+            "flex-start" | "start" => Some(AlignItems::FLEX_START),
+            "flex-end" | "end" => Some(AlignItems::FLEX_END),
+            "center" => Some(AlignItems::CENTER),
+            "stretch" => Some(AlignItems::STRETCH),
+            "baseline" => Some(AlignItems::BASELINE),
+            _ => None,
+        };
+    }
+    
+    if let Some(SteelVal::SymbolV(justify)) = get_field(val, "justify_content") {
+        style.layout.justify_content = match justify.as_str() {
+            "flex-start" | "start" => Some(JustifyContent::FLEX_START),
+            "flex-end" | "end" => Some(JustifyContent::FLEX_END),
+            "center" => Some(JustifyContent::CENTER),
+            "space-between" => Some(JustifyContent::SPACE_BETWEEN),
+            "space-around" => Some(JustifyContent::SPACE_AROUND),
+            "space-evenly" => Some(JustifyContent::SPACE_EVENLY),
+            _ => None,
+        };
+    }
+    
+    if let Some(pos) = get_field(val, "position") {
+        if let Some(SteelVal::SymbolV(pos_type)) = get_field(pos, "type") {
+            style.layout.position = match pos_type.as_str() {
+                "absolute" => Position::Absolute,
+                _ => Position::Relative,
+            };
+        }
+        if let Some(t) = get_field(pos, "top") { style.layout.inset.top = parse_length_percentage_auto(t); }
+        if let Some(r) = get_field(pos, "right") { style.layout.inset.right = parse_length_percentage_auto(r); }
+        if let Some(b) = get_field(pos, "bottom") { style.layout.inset.bottom = parse_length_percentage_auto(b); }
+        if let Some(l) = get_field(pos, "left") { style.layout.inset.left = parse_length_percentage_auto(l); }
+    }
+    
+    if let Some(size) = get_field(val, "size") {
+        if let Some(w) = get_field(size, "width") { style.layout.size.width = parse_dimension(w); }
+        if let Some(h) = get_field(size, "height") { style.layout.size.height = parse_dimension(h); }
+    }
+    
+    if let Some(size) = get_field(val, "max_size") {
+        if let Some(w) = get_field(size, "width") { style.layout.max_size.width = parse_dimension(w); }
+        if let Some(h) = get_field(size, "height") { style.layout.max_size.height = parse_dimension(h); }
+    }
+    
+    if let Some(size) = get_field(val, "min_size") {
+        if let Some(w) = get_field(size, "width") { style.layout.min_size.width = parse_dimension(w); }
+        if let Some(h) = get_field(size, "height") { style.layout.min_size.height = parse_dimension(h); }
+    }
+    
+    if let Some(padding) = get_field(val, "padding") {
+        if let Some(all) = get_field(padding, "all") {
+            let p = parse_length_percentage(all);
+            style.layout.padding = taffy::Rect { top: p, right: p, bottom: p, left: p };
+        } else {
+            if let Some(t) = get_field(padding, "top") { style.layout.padding.top = parse_length_percentage(t); }
+            if let Some(r) = get_field(padding, "right") { style.layout.padding.right = parse_length_percentage(r); }
+            if let Some(b) = get_field(padding, "bottom") { style.layout.padding.bottom = parse_length_percentage(b); }
+            if let Some(l) = get_field(padding, "left") { style.layout.padding.left = parse_length_percentage(l); }
+        }
+    }
+    
+    if let Some(margin) = get_field(val, "margin") {
+        if let Some(all) = get_field(margin, "all") {
+            let m = parse_length_percentage_auto(all);
+            style.layout.margin = taffy::Rect { top: m, right: m, bottom: m, left: m };
+        } else {
+            if let Some(t) = get_field(margin, "top") { style.layout.margin.top = parse_length_percentage_auto(t); }
+            if let Some(r) = get_field(margin, "right") { style.layout.margin.right = parse_length_percentage_auto(r); }
+            if let Some(b) = get_field(margin, "bottom") { style.layout.margin.bottom = parse_length_percentage_auto(b); }
+            if let Some(l) = get_field(margin, "left") { style.layout.margin.left = parse_length_percentage_auto(l); }
+        }
+    }
+    
+    if let Some(gap) = get_field(val, "gap") {
+        if let Some(all) = get_field(gap, "all") {
+            let g = parse_length_percentage(all);
+            style.layout.gap = taffy::Size { width: g, height: g };
+        } else {
+            if let Some(x) = get_field(gap, "x") { style.layout.gap.width = parse_length_percentage(x); }
+            if let Some(y) = get_field(gap, "y") { style.layout.gap.height = parse_length_percentage(y); }
+        }
     }
 
-    /// Find the font spec for a text block whose body contains the given marker.
-    /// Falls back to default font if no matching block is found.
-    pub fn font_for(&self, marker: &str) -> FontSpec {
-        for block in &self.blocks {
-            if (block.block_type == TEXT_BLOCK || block.block_type == RICH_TEXT_BLOCK)
-                && block.body_template.contains(marker)
-            {
-                if let Some(ref font) = block.font {
-                    return font.clone();
+    if let Some(opacity) = get_field(val, "opacity").and_then(parse_f64) {
+        style.opacity = opacity as f32;
+    }
+    if let Some(rotate) = get_field(val, "rotate_deg").and_then(parse_f64) {
+        style.rotate_deg = rotate;
+    }
+    style
+}
+
+fn parse_content(val: &SteelVal) -> Content {
+    if let Some(group) = get_field(val, "group") {
+        let mut children = Vec::new();
+        if let SteelVal::ListV(list) = group {
+            for item in list.iter() {
+                if let Ok(node) = parse_node(item) {
+                    children.push(node);
                 }
             }
         }
-        FontSpec::default()
+        return Content::Group(children);
     }
-
-    /// Build a ParsedMessage directly without going through COFFIN.
-    pub fn build_message(
-        &self,
-        msg: &InputMessage,
-        layout: &QuoteLayout,
-        env: &Environment,
-    ) -> Result<ParsedMessage, Box<dyn std::error::Error>> {
-
-        let username_val = msg.username.as_deref().unwrap_or("");
-        let avatar_initials = get_avatar_initials(username_val);
-        let grad_id = msg.grad_id.unwrap_or(0);
-        let (avatar_color_top, avatar_color_bottom) = get_avatar_gradient(grad_id);
-
-        let ctx = minijinja::context! {
-            // Content variables
-            username => username_val,
-            user_status => msg.user_status.as_deref(),
-            user_role => msg.user_role.as_deref().unwrap_or("member"),
-            content => msg.content.as_deref().unwrap_or("").trim_end(),
-            entities => msg.entities.as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "[]".to_string()),
-            image => msg.image.as_deref().unwrap_or(""),
-            avatar_initials => avatar_initials,
-            avatar_color_top => avatar_color_top,
-            avatar_color_bottom => avatar_color_bottom,
-            // Layout — canvas
-            svg_width => layout.canvas.width,
-            svg_height => layout.canvas.height,
-            // Layout — bubble
-            bubble_width => layout.bubble.width,
-            bubble_height => layout.bubble.height,
-            // Layout — text wrap
-            wrap_width => layout.wrap_width,
-        };
-
-        let mut svg = SvgMessage { data: String::new() };
-        let mut texts = Vec::new();
-
-        let header = msg.header.as_ref()
-            .map(|h| h.to_string())
-            .unwrap_or_else(|| "{}".to_string());
-
-        // Template blocks
-        let has_image = msg.image.as_deref().map_or(false, |s| !s.is_empty());
-
-        for block in &self.blocks {
-            if msg.user_status.is_none() && block.body_template.contains("user_status") {
-                continue;
-            }
-            if (has_image || avatar_initials.is_empty()) && block.body_template.contains("avatar_initials") {
-                continue;
-            }
-
-            let rendered = env.render_str(&block.body_template, &ctx)?;
-
-            match block.block_type {
-                SVG_BLOCK => svg.data = rendered,
-                TEXT_BLOCK=> texts.push(parser::parse_text(&rendered)?),
-                RICH_TEXT_BLOCK => texts.push(parser::parse_rich_text(&rendered)?),
-                _ => return Err(format!("Unknown block type: {}", block.block_type).into()),
+    if let Some(shape) = get_field(val, "shape") {
+        let kind = get_field(shape, "kind").and_then(parse_shape_kind).unwrap_or(ShapeKind::Circle);
+        let fill = get_field(shape, "fill").and_then(parse_paint);
+        return Content::Shape { kind, fill, stroke: None };
+    }
+    if let Some(text) = get_field(val, "text") {
+        let text_str = get_field(text, "value")
+            .and_then(|v| {
+                if let SteelVal::StringV(s) = v { Some(s.to_string()) } else { None }
+            })
+            .unwrap_or_default();
+        let mut rich = RichText::plain(text_str);
+        
+        if let Some(color_val) = get_field(text, "color") {
+            if let Some(c) = parse_color(color_val) {
+                rich.default_color = c;
             }
         }
-
-        Ok(ParsedMessage {
-            header,
-            svg,
-            texts,
-        })
+        
+        if let Some(size_val) = get_field(text, "size").and_then(parse_f64) {
+            rich.default_font_size = size_val;
+            rich.root_font_size = size_val;
+        }
+        if let Some(family_val) = get_field(text, "family") {
+            if let SteelVal::StringV(f) = family_val {
+                rich.default_family = f.to_string();
+            }
+        }
+        if let Some(weight_val) = get_field(text, "weight").and_then(parse_f64) {
+            rich.default_weight = FontWeight::new(weight_val as f32);
+        }
+        
+        if let Some(SteelVal::ListV(spans_list)) = get_field(text, "spans") {
+            for span_val in spans_list.iter() {
+                if let (Some(start), Some(end)) = (get_field(span_val, "start").and_then(parse_f64), get_field(span_val, "end").and_then(parse_f64)) {
+                    if start < end {
+                        let mut span = Span::new(start as usize..end as usize);
+                        if let Some(color_val) = get_field(span_val, "color") {
+                            if let Some(c) = parse_color(color_val) { span.color = c; }
+                        }
+                        if let Some(weight_val) = get_field(span_val, "weight").and_then(parse_f64) {
+                            span.weight = parley::style::FontWeight::new(weight_val as f32);
+                        }
+                        if let Some(family) = get_field(span_val, "family") {
+                            if let SteelVal::StringV(f) = family { span.font_family = Some(f.to_string()); }
+                        }
+                        if let Some(size) = get_field(span_val, "size").and_then(parse_f64) {
+                            span.font_size = size;
+                        }
+                        rich = rich.with_span(span);
+                    }
+                }
+            }
+        }
+        
+        return Content::Text(rich);
     }
+    
+    Content::Group(vec![])
+}
+
+fn parse_node(val: &SteelVal) -> Result<Node, Box<dyn std::error::Error>> {
+    let mut style = Style::default();
+    let mut content = Content::Group(vec![]);
+
+    if let Some(s) = get_field(val, "style") {
+        style = parse_style(s);
+    }
+    
+    if let Some(c) = get_field(val, "content") {
+        content = parse_content(c);
+    }
+
+    Ok(Node { style, content })
 }

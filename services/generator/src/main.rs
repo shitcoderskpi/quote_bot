@@ -1,73 +1,63 @@
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use vello::kurbo::Affine;
+use vello::kurbo::Rect;
 use vello::Scene;
 
 mod compressor;
 mod config;
-mod layout;
-mod parser;
 mod redis_queue;
-mod renderer;
 mod templater;
-mod text;
+mod primitives;
+mod renderer;
 
 fn process_job(
     raw: &str,
     cfg: &config::Config,
+    templater: &mut templater::Templater,
+    renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
-    font_cx: &mut parley::FontContext,
-    layout_cx: &mut parley::LayoutContext,
-    env: &minijinja::Environment,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    // ── Stage 1: Parse input and produce wire-format message ──
-    let (msg, dpi) = if raw.trim_start().starts_with('{') {
-        // JSON input → template pipeline
-        let input_msg: templater::InputMessage = serde_json::from_str(raw)?;
-        let msg_dpi = input_msg.dpi;
+    
+    // Parse input message wrapper
+    let input_msg: serde_json::Value = serde_json::from_str(raw)?;
+    let dpi = input_msg.get("dpi").and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(cfg.dpi);
 
-        let theme = input_msg.theme.as_deref().unwrap_or("light");
-        let template_name = if theme == "dark" { "dark.tem" } else { "light.tem" };
-        let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
-        let template_str = std::fs::read_to_string(&template_path)?;
+    let theme = input_msg.get("theme").and_then(|v| v.as_str()).unwrap_or("light");
+    let template_name = if theme == "dark" { "dark.scm" } else { "light.scm" };
+    let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
+    let template_str = std::fs::read_to_string(&template_path)?;
 
-        // Parse template once — used for both font lookups and rendering
-        let template = templater::ParsedTemplate::parse(&template_str);
-        let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
-        let msg = template.build_message(&input_msg, &quote_layout, &env)?;
+    // Evaluate the template script using Steel, which returns the primitive Node tree
+    let node_tree = templater.render_template(&template_str, raw)?;
+    // println!("Parsed Node Tree: {:#?}", node_tree);
 
-        (msg, msg_dpi)
-    } else {
-        // Raw wire-format input (no template)
-        let msg = parser::parse(raw)?;
-        (msg, None)
-    };
+    // The output dimensions can be inferred from the tree size, or fixed canvas.
+    // For now, let's fix a default canvas or extract it from the root node if possible.
+    // We'll use 512x512 as an initial working canvas for testing if size is Auto.
+    let mut renderer = primitives::Renderer::new();
+    let viewport = primitives::Viewport { width: 1000.0, height: 1000.0 };
+    
+    // Measure the tree to determine the actual image dimensions!
+    let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport, 16.0);
+    
+    // Use the measured dimensions (plus a little padding if you want)
+    let width = measured_w.max(1.0); 
+    let height = measured_h.max(1.0);
 
-    // ── Stage 2: Build vello scene from SVG ──
-    let mut scene = vello_svg::render(&msg.svg.data)?;
+    let mut scene = Scene::new();
+    let root_box = Rect::new(0.0, 0.0, width, height);
 
-    let tree = vello_svg::usvg::Tree::from_str(
-        &msg.svg.data,
-        &vello_svg::usvg::Options::default(),
-    )?;
-    let size = tree.size();
-    let width = size.width().ceil() as u32;
-    let height = size.height().ceil() as u32;
+    renderer.render(&mut scene, &node_tree, root_box, viewport);
 
-    // ── Stage 3: Draw text layers onto scene ──
-    text::draw_text_layers(&mut scene, &msg.texts, font_cx, layout_cx);
-
-    // ── Stage 4: Scale for DPI and rasterize ──
-    let dpi = dpi.unwrap_or(cfg.dpi);
     let scale = dpi as f64 / 96.0;
+    let scaled_width = (width * scale).ceil() as u32;
+    let scaled_height = (height * scale).ceil() as u32;
+    
+    // Scale the scene for DPI
     let mut scaled_scene = Scene::new();
-    scaled_scene.append(&scene, Some(Affine::scale(scale)));
+    scaled_scene.append(&scene, Some(vello::kurbo::Affine::scale(scale)));
 
-    let scaled_width = (width as f64 * scale).ceil() as u32;
-    let scaled_height = (height as f64 * scale).ceil() as u32;
-
-    let (w, h, pixels) =
-        render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height)?;
+    let (w, h, pixels) = render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height)?;
     info!("Rendered {}x{}", w, h);
 
     // ── Stage 5: Encode to WebP ──
@@ -79,7 +69,13 @@ fn process_job(
     // ── Stage 6: Build result JSON, compress, return ──
     use base64::prelude::*;
     let b64_img = BASE64_STANDARD.encode(webp_data.into_inner());
-    let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, msg.header, b64_img);
+    
+    // extract header from payload if any
+    let header = input_msg.get("header")
+        .map(|h| h.to_string())
+        .unwrap_or_else(|| "{}".to_string());
+
+    let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, header, b64_img);
 
     let compressed = compressor::compress(&json_res, 9)?;
     Ok(compressed)
@@ -91,29 +87,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("generator=info".parse()?))
         .init();
 
-    let cfg = match config::Config::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Configuration Error: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
-    let mut queue = match redis_queue::RedisQueue::connect(&cfg).await {
-        Ok(q) => q,
-        Err(e) => {
-            error!("Failed to connect to Redis: {}", e);
-            std::process::exit(1);
-        }
-    };
-
+    let cfg = config::Config::from_env()?;
+    let mut templater = templater::Templater::new();
+    
+    let mut renderer = primitives::Renderer::new();
+    
     let mut render_ctx = renderer::RenderContext::new()
         .await
         .expect("Failed to initialize GPU render context");
 
-    let mut font_cx = parley::FontContext::new();
-    let mut layout_cx = parley::LayoutContext::new();
+    info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
+    let mut queue = redis_queue::RedisQueue::connect(&cfg).await?;
 
     loop {
         let payload = match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
@@ -133,8 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let env = minijinja::Environment::new();
-        match process_job(&raw, &cfg, &mut render_ctx, &mut font_cx, &mut layout_cx, &env) {
+        match process_job(&raw, &cfg, &mut templater, &mut renderer, &mut render_ctx) {
             Ok(result) => {
                 if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
                     error!("Failed to enqueue result: {}", e);
