@@ -34,7 +34,6 @@ fn process_job(
     // The output dimensions can be inferred from the tree size, or fixed canvas.
     // For now, let's fix a default canvas or extract it from the root node if possible.
     // We'll use 512x512 as an initial working canvas for testing if size is Auto.
-    let mut renderer = primitives::Renderer::new();
     let viewport = primitives::Viewport { width: 1000.0, height: 1000.0 };
     
     // Measure the tree to determine the actual image dimensions!
