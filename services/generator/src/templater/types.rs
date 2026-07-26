@@ -216,14 +216,20 @@ impl StyleMod {
 
 // ── Text modifier ────────────────────────────────────────────
 
-/// A modifier that patches one field of a `RichText`. Collected by `(text ...)`.
+/// A modifier that patches one field of a `RichText`. Collected by `(text ...)` and `(span ...)`.
 #[derive(Clone, Debug)]
 pub enum TextMod {
-    Size(f64),
+    Size(SchemeDimension),
     Color(vello::peniko::Color),
     Family(String),
-    Weight(f32),
+    Weight(parley::FontWeight),
+    Italic,
+    Underline,
+    Strikethrough,
+    LineHeight(f32),
     Align(crate::primitives::text::TextAlign),
+    LinkColor(vello::peniko::Color),
+    CodeFamily(String),
 }
 
 impl Custom for TextMod {}
@@ -231,14 +237,24 @@ impl Custom for TextMod {}
 impl TextMod {
     pub fn apply(&self, rich: &mut RichText) {
         match self {
-            TextMod::Size(s) => {
-                rich.default_font_size = *s;
-                rich.root_font_size = *s;
+            TextMod::Size(d) => {
+                let s = match d {
+                    SchemeDimension::Length(l) => *l as f64,
+                    SchemeDimension::Percent(p) => (rich.root_font_size * (*p as f64)),
+                    SchemeDimension::Auto => rich.root_font_size,
+                };
+                rich.default_font_size = s;
+                rich.root_font_size = s;
             }
             TextMod::Color(c) => rich.default_color = *c,
             TextMod::Family(f) => rich.default_family = f.clone(),
-            TextMod::Weight(w) => rich.default_weight = parley::FontWeight::new(*w),
+            TextMod::Weight(w) => rich.default_weight = *w,
+            TextMod::Italic => rich.default_italic = true,
+            TextMod::Underline => rich.default_underline = true,
+            TextMod::Strikethrough => rich.default_strikethrough = true,
+            TextMod::LineHeight(lh) => rich.default_line_height = Some(*lh),
             TextMod::Align(a) => rich.align = *a,
+            TextMod::LinkColor(_) | TextMod::CodeFamily(_) => {} // Handled during eager entity injection
         }
     }
 }

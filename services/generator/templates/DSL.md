@@ -42,11 +42,13 @@ Steel Scheme (`.scm`) template files build a **Node tree** using registered Rust
 
 ## Paints (fill / stroke values)
 
-| Call                                    | Description                                                               |
-|-----------------------------------------|---------------------------------------------------------------------------|
-| `(solid COLOR)`                         | Solid fill. `(solid (hex "#FFF"))`                                        |
-| `(linear-gradient COLOR COLOR)`         | Simple top→bottom gradient. `(linear-gradient (hex "#fff") (hex "#000"))` |
-| `(linear-gradient ANGLE STOP STOP ...)` | Rich gradient with custom angle and stops                                 |
+| Call                                    | Description                                                                                                                          |
+|-----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `(solid COLOR)`                         | Solid fill. `(solid (hex "#FFF"))`                                                                                                   |
+| `(linear-gradient COLOR COLOR)`         | Simple top→bottom gradient. `(linear-gradient (hex "#fff") (hex "#000"))`                                                            |
+| `(linear-gradient ANGLE STOP STOP ...)` | Rich gradient with custom angle and stops                                                                                            |
+| `(radial-gradient STOP STOP ...)`       | Radial gradient from center to edge. `(radial-gradient (stop 0 (hex "#fff")) (stop 100 (hex "#000")))`                               |
+| `(sweep-gradient ANGLE ANGLE STOP ...)` | Sweep gradient from start angle to end angle. `(sweep-gradient (angle 0) (angle 360) (stop 0 (hex "#fff")) (stop 100 (hex "#000")))` |
 
 ### Rich gradient helpers
 
@@ -95,6 +97,16 @@ A `node` with no explicit `style` uses default flex layout.
 
 ---
 
+### `(image BASE64_STR [CLIP_SHAPE])`
+
+Creates an image node from a base64 encoded string (JPEG, PNG, WebP). Optionally specify a clip shape.
+
+```scheme
+(image (get-payload 'image "") (circle))
+```
+
+---
+
 ### `(text STRING [MODS...])`
 
 Creates a text node. First arg is the string content; remaining args are text modifiers.
@@ -110,13 +122,15 @@ Creates a text node. First arg is the string content; remaining args are text mo
 
 #### Text modifiers
 
-| Call            | Description                                       |
-|-----------------|---------------------------------------------------|
-| `(size N)`      | Font size in px (f64)                             |
-| `(color COLOR)` | Text color                                        |
-| `(family STR)`  | Font family name. `"sans-serif"`, `"Inter"`, etc. |
-| `(weight N)`    | Font weight: 400 = regular, 700 = bold            |
-| `(align SYM)`   | `'start`, `'center`, `'end`, `'justify`           |
+| Call              | Description                                       |
+|-------------------|---------------------------------------------------|
+| `(size (unit))`   | Font size                                         |
+| `(color COLOR)`   | Text color                                        |
+| `(family STR)`    | Font family name. `"sans-serif"`, `"Inter"`, etc. |
+| `(weight N)`      | Font weight: 400 = regular, 700 = bold            |
+| `(italic)`        | Sets italic font style                            |
+| `(line-height N)` | Sets relative line height (e.g. `1.2`)            |
+| `(align SYM)`     | `'start`, `'center`, `'end`, `'justify`           |
 
 ---
 

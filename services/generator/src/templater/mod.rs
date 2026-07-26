@@ -9,7 +9,7 @@ mod functions;
 use crate::primitives::node::Node;
 use steel::rvals::{FromSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
-
+use steel::steel_vm::register_fn::RegisterFn;
 pub use types::SchemeNode;
 
 pub struct Templater {
@@ -27,9 +27,41 @@ impl Templater {
         &mut self,
         template_src: &str,
         payload_json: &str,
+        content_opt: Option<String>,
+        entities_opt: Option<Vec<serde_json::Value>>,
     ) -> Result<Node, Box<dyn std::error::Error>> {
-        let payload_val: serde_json::Value = serde_json::from_str(payload_json)?;
+        let mut payload_val: serde_json::Value = serde_json::from_str(payload_json)?;
+        
+        // Calculate avatar initials and gradient colors in Rust
+        if let Some(obj) = payload_val.as_object_mut() {
+            let username = obj.get("username").and_then(|v| v.as_str()).unwrap_or("");
+            let initials = username
+                .split_whitespace()
+                .take(2)
+                .filter_map(|s| s.chars().next())
+                .collect::<String>()
+                .to_uppercase();
+            obj.insert("avatar_initials".to_string(), serde_json::Value::String(initials));
+            
+            let grad_id = obj.get("grad_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let colors = match grad_id % 7 {
+                0 => ("#FF516A", "#FF885E"), // Red
+                1 => ("#FFA85C", "#FFCD6A"), // Orange
+                2 => ("#8C79F2", "#B37DF2"), // Purple
+                3 => ("#51BB3F", "#8AE451"), // Green
+                4 => ("#34C6CD", "#4CE9C2"), // Cyan
+                5 => ("#549CFF", "#3CB9FE"), // Blue
+                _ => ("#F2799B", "#F27DF2"), // Pink (6)
+            };
+            obj.insert("avatar_color_top".to_string(), serde_json::Value::String(colors.0.to_string()));
+            obj.insert("avatar_color_bottom".to_string(), serde_json::Value::String(colors.1.to_string()));
+        }
+        
         let assoc_str = json_to_scheme(&payload_val);
+        
+        self.engine.register_fn("%make-text", move |content: SteelVal, mods: SteelVal| {
+            functions::fn_make_text(content, mods, &content_opt, &entities_opt)
+        });
 
         let script = format!(
             "(define payload {})\n\
@@ -38,6 +70,7 @@ impl Templater {
                  (if (and found (not (null? (cdr found))))\n\
                      (cdr found)\n\
                      default-val)))\n\
+             (define (text content . mods) (%make-text content mods))\n\
              {}",
             assoc_str, template_src
         );

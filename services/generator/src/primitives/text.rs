@@ -16,10 +16,12 @@ use std::ops::Range;
 pub struct Span {
     pub range: Range<usize>,
     pub font_family: Option<String>,
-    pub font_size: f64,
-    pub weight: FontWeight,
-    pub italic: bool,
-    pub color: vello::peniko::Color,
+    pub font_size: Option<f64>,
+    pub weight: Option<FontWeight>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub strikethrough: Option<bool>,
+    pub color: Option<vello::peniko::Color>,
     pub line_height: Option<f32>,
 }
 
@@ -28,10 +30,12 @@ impl Span {
         Self {
             range,
             font_family: None,
-            font_size: 16.0,
-            weight: FontWeight::NORMAL,
-            italic: false,
-            color: vello::peniko::Color::BLACK,
+            font_size: None,
+            weight: None,
+            italic: None,
+            underline: None,
+            strikethrough: None,
+            color: None,
             line_height: None,
         }
     }
@@ -52,8 +56,12 @@ pub struct RichText {
     pub align: TextAlign,
     pub default_font_size: f64,
     pub default_family: String,
-    pub default_color: vello::peniko::Color,
+    pub default_color: peniko::Color,
     pub default_weight: FontWeight,
+    pub default_italic: bool,
+    pub default_underline: bool,
+    pub default_strikethrough: bool,
+    pub default_line_height: Option<f32>,
     /// Root font size, used to resolve `Em` lengths inside this block.
     pub root_font_size: f64,
 }
@@ -68,6 +76,10 @@ impl RichText {
             default_family: "system-ui".to_string(),
             default_color: vello::peniko::Color::BLACK,
             default_weight: FontWeight::NORMAL,
+            default_italic: false,
+            default_underline: false,
+            default_strikethrough: false,
+            default_line_height: None,
             root_font_size: 16.0,
         }
     }
@@ -95,17 +107,42 @@ impl RichText {
         builder.push_default(StyleProperty::FontSize(self.default_font_size as f32));
         builder.push_default(StyleProperty::Brush(Brush::Solid(self.default_color)));
         builder.push_default(StyleProperty::FontWeight(self.default_weight));
+        if self.default_italic {
+            builder.push_default(StyleProperty::FontStyle(parley::FontStyle::Italic));
+        }
+        if self.default_underline {
+            builder.push_default(StyleProperty::Underline(true));
+        }
+        if self.default_strikethrough {
+            builder.push_default(StyleProperty::Strikethrough(true));
+        }
+        if let Some(lh) = self.default_line_height {
+            builder.push_default(StyleProperty::LineHeight(parley::style::LineHeight::MetricsRelative(lh)));
+        }
 
         for span in &self.spans {
-            builder.push(StyleProperty::FontSize(span.font_size as f32), span.range.clone());
-            builder.push(StyleProperty::FontWeight(span.weight), span.range.clone());
-            if span.italic {
-                builder.push(StyleProperty::FontStyle(parley::FontStyle::Italic), span.range.clone());
+            if let Some(fs) = span.font_size {
+                builder.push(StyleProperty::FontSize(fs as f32), span.range.clone());
             }
-            builder.push(
-                StyleProperty::Brush(Brush::Solid(span.color)),
-                span.range.clone(),
-            );
+            if let Some(w) = span.weight {
+                builder.push(StyleProperty::FontWeight(w), span.range.clone());
+            }
+            if let Some(italic) = span.italic {
+                if italic {
+                    builder.push(StyleProperty::FontStyle(parley::FontStyle::Italic), span.range.clone());
+                } else {
+                    builder.push(StyleProperty::FontStyle(parley::FontStyle::Normal), span.range.clone());
+                }
+            }
+            if let Some(underline) = span.underline {
+                builder.push(StyleProperty::Underline(underline), span.range.clone());
+            }
+            if let Some(strikethrough) = span.strikethrough {
+                builder.push(StyleProperty::Strikethrough(strikethrough), span.range.clone());
+            }
+            if let Some(c) = span.color {
+                builder.push(StyleProperty::Brush(Brush::Solid(c)), span.range.clone());
+            }
             if let Some(lh) = span.line_height {
                 builder.push(StyleProperty::LineHeight(parley::style::LineHeight::MetricsRelative(lh)), span.range.clone());
             }

@@ -21,7 +21,11 @@
 (define avatar-initials (get-payload 'avatar_initials ""))
 (define avatar-top (get-payload 'avatar_color_top "#ffffff"))
 (define avatar-bottom (get-payload 'avatar_color_bottom "#dddddd"))
-(define has-image? (not (equal? (get-payload 'image #f) #f)))
+(define has-image? (not (equal? (get-payload 'image "") "")))
+
+;; Global style settings
+(define theme-link-color (hex "#4CA635"))
+(define theme-code-family "monospace")
 
 ;; Root: flex row, avatar + bubble
 (node (style (flex-row) (align-items 'end)
@@ -36,11 +40,11 @@
                  (inset (px 0) (px 0) (px 0) (px 0)))
       (shape (circle)
              (fill (linear-gradient (hex avatar-top) (hex avatar-bottom)))))
-    ;; Avatar initials
-    (if (not has-image?)
+    ;; Avatar initials or image
+    (if has-image?
+        (image (get-payload 'image "") (circle))
         (text avatar-initials
-              (size 14) (color (hex "#ffffff")) (family "sans-serif") (weight 700))
-        (node (style (hidden)))))
+              (size (pt 14)) (color (hex "#ffffff")) (family "sans-serif") (weight 700))))
 
   ;; 2. Bubble Container
   (node (style (direction 'column) (relative)
@@ -64,7 +68,7 @@
                  (margin-bottom (px 4)) (gap (px 6)))
       ;; Username
       (text username
-            (size 15) (color (hex "#4CA635")) (family "sans-serif") (weight 700))
+            (size (pt 15)) (color (hex "#4CA635")) (family "sans-serif") (weight 700))
       ;; Status tag
       (if (not (equal? raw-status ""))
           (node (style (direction 'row) (align-items 'center) (justify-content 'center)
@@ -74,9 +78,11 @@
               (shape (rounded-rect (px 100))
                      (fill (solid status-bg))))
             (text raw-status
-                  (size 13) (color status-color) (family "sans-serif")))
+                  (size (pt 13)) (color status-color) (family "sans-serif")))
           (node (style (hidden)))))
 
     ;; 2d. Message content
     (text content
-          (size 15) (color (hex "#000000")) (family "sans-serif"))))
+          (size (pt 15)) (color (hex "#000000")) (family "sans-serif")
+          (link-color theme-link-color)
+          (code-family theme-code-family))))

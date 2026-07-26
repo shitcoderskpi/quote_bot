@@ -12,7 +12,7 @@ use vello::Glyph;
 pub struct Renderer {
     font_cx: Arc<Mutex<FontContext>>,
     layout_cx: Arc<Mutex<LayoutContext<Brush>>>,
-    taffy: TaffyTree<crate::primitives::node::Content>,
+    taffy: TaffyTree<Content>,
     root_id: Option<NodeId>,
 }
 
@@ -38,7 +38,7 @@ impl Renderer {
             root_id,
             Size { width: AvailableSpace::Definite(1000.0), height: AvailableSpace::Definite(1000.0) },
             |known_dims, avail_space, _id, ctx, _tree| {
-                if let Some(crate::primitives::node::Content::Text(rich)) = ctx {
+                if let Some(Content::Text(rich)) = ctx {
                     let mut fcx = font_cx.lock().unwrap();
                     let mut lcx = layout_cx.lock().unwrap();
                     let max_width = known_dims.width.map(|w| w as f64).or_else(|| {
@@ -51,6 +51,10 @@ impl Renderer {
                     
                     let layout = rich.layout(&mut fcx, &mut lcx, max_width, viewport);
                     Size { width: layout.width(), height: layout.height() }
+                } else if let Some(Content::Image { image, .. }) = ctx {
+                    let iw = image.image.width as f32;
+                    let ih = image.image.height as f32;
+                    Size { width: iw, height: ih }
                 } else {
                     Size::ZERO
                 }
@@ -79,6 +83,9 @@ impl Renderer {
                 self.taffy.new_with_children(style, &child_ids).unwrap()
             }
             Content::Text(_) => {
+                self.taffy.new_leaf_with_context(style, node.content.clone()).unwrap()
+            }
+            Content::Image { .. } => {
                 self.taffy.new_leaf_with_context(style, node.content.clone()).unwrap()
             }
             _ => {
@@ -181,6 +188,31 @@ fn draw_text_layout(scene: &mut Scene, transform: Affine, layout: &parley::Layou
                             Glyph { id: g.id, x: gx as f32, y: gy as f32 }
                         }),
                     );
+                    
+                let style = glyph_run.style();
+                let run_width = glyph_run.advance();
+                
+                if style.underline.is_some() {
+                    let underline = style.underline.as_ref().unwrap();
+                    let offset = underline.offset.unwrap_or(run.metrics().underline_offset) as f64;
+                    let size = underline.size.unwrap_or(run.metrics().underline_size) as f64;
+                    let y_pos = y - offset;
+                    let start_x = glyph_run.offset() as f64;
+                    let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0, start_x + run_width as f64, y_pos + size / 2.0);
+                    let brush = &underline.brush;
+                    scene.fill(Fill::NonZero, transform, brush, None, &rect);
+                }
+                
+                if style.strikethrough.is_some() {
+                    let strikethrough = style.strikethrough.as_ref().unwrap();
+                    let offset = strikethrough.offset.unwrap_or(run.metrics().strikethrough_offset) as f64;
+                    let size = strikethrough.size.unwrap_or(run.metrics().strikethrough_size) as f64;
+                    let y_pos = y - offset;
+                    let start_x = glyph_run.offset() as f64;
+                    let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0, start_x + run_width as f64, y_pos + size / 2.0);
+                    let brush = &strikethrough.brush;
+                    scene.fill(Fill::NonZero, transform, brush, None, &rect);
+                }
             }
         }
     }

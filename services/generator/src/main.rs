@@ -27,8 +27,12 @@ fn process_job(
     let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
     let template_str = std::fs::read_to_string(&template_path)?;
 
+    let content_opt = input_msg.get("content").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let entities_opt = input_msg.get("entities").and_then(|v| v.as_array()).cloned();
+
     // Evaluate the template script using Steel, which returns the primitive Node tree
-    let node_tree = templater.render_template(&template_str, raw)?;
+    let node_tree = templater.render_template(&template_str, raw, content_opt, entities_opt)?;
+
     // println!("Parsed Node Tree: {:#?}", node_tree);
 
     // The output dimensions can be inferred from the tree size, or fixed canvas.
@@ -40,8 +44,8 @@ fn process_job(
     let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport, 16.0);
     
     // Use the measured dimensions (plus a little padding if you want)
-    let width = measured_w.max(1.0); 
-    let height = measured_h.max(1.0);
+    let width  = measured_w;
+    let height = measured_h;
 
     let mut scene = Scene::new();
     let root_box = Rect::new(0.0, 0.0, width, height);

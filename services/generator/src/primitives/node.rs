@@ -77,6 +77,10 @@ impl Node {
         Self { style: Style::default(), content: Content::Group(children) }
     }
 
+    pub fn image(image: Arc<ImageBrush>, clip: Option<ShapeKind>) -> Self {
+        Self { style: Style::default(), content: Content::Image { image, clip } }
+    }
+
     pub fn with_style(mut self, style: Style) -> Self {
         self.style = style;
         self

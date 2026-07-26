@@ -6,10 +6,13 @@ use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
 use crate::primitives::text::{RichText, TextAlign};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as Base64Engine};
 use steel::rvals::{FromSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
+use std::sync::Arc;
 use taffy::prelude::*;
+use vello::peniko::ImageBrush;
 
 use super::types::*;
 
@@ -90,6 +93,12 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("color", fn_color);
     engine.register_fn("family", fn_family);
     engine.register_fn("weight", fn_weight);
+    engine.register_fn("italic", fn_italic);
+    engine.register_fn("underline", || TextMod::Underline);
+    engine.register_fn("strikethrough", || TextMod::Strikethrough);
+    engine.register_fn("link-color", fn_link_color);
+    engine.register_fn("code-family", fn_code_family);
+    engine.register_fn("line-height", fn_line_height);
     engine.register_fn("align", fn_text_align);
 
     // ── Utility ──────────────────────────────────────────────
@@ -98,11 +107,14 @@ pub fn register_all(engine: &mut Engine) {
     // ── Varargs constructors (Scheme wrappers around Rust impls) ──
     engine.register_fn("%make-style", fn_make_style);
     engine.register_fn("%make-node", fn_make_node);
-    engine.register_fn("%make-text", fn_make_text);
+
     engine.register_fn("%make-shape", fn_make_shape);
     engine.register_fn("%make-linear-gradient", fn_make_linear_gradient);
+    engine.register_fn("%make-radial-gradient", fn_make_radial_gradient);
+    engine.register_fn("%make-sweep-gradient", fn_make_sweep_gradient);
     engine.register_fn("%make-rounded-rect", fn_make_rounded_rect);
     engine.register_fn("%make-padding", fn_make_padding);
+    engine.register_fn("%make-image", fn_make_image);
 
     // Inject thin Scheme wrappers that collect rest-args into lists
     engine
@@ -110,11 +122,13 @@ pub fn register_all(engine: &mut Engine) {
             r#"
             (define (style . mods) (%make-style mods))
             (define (node . args) (%make-node args))
-            (define (text content . mods) (%make-text content mods))
             (define (shape kind . mods) (%make-shape kind mods))
             (define (linear-gradient . args) (%make-linear-gradient args))
+            (define (radial-gradient . args) (%make-radial-gradient args))
+            (define (sweep-gradient . args) (%make-sweep-gradient args))
             (define (rounded-rect . args) (%make-rounded-rect args))
             (define (padding . args) (%make-padding args))
+            (define (image data . args) (%make-image data args))
             "#,
         )
         .expect("Failed to register Scheme wrapper functions");
@@ -415,10 +429,14 @@ fn fn_rotate(v: SchemeNumber) -> StyleMod { StyleMod::Rotate(v.0) }
 //  Text modifiers
 // ═══════════════════════════════════════════════════════════════
 
-fn fn_size(v: SchemeNumber) -> TextMod { TextMod::Size(v.0) }
+fn fn_size(d: SchemeDimension) -> TextMod { TextMod::Size(d) }
 fn fn_color(c: SchemeColor) -> TextMod { TextMod::Color(c.0) }
 fn fn_family(s: String) -> TextMod { TextMod::Family(s) }
-fn fn_weight(v: SchemeNumber) -> TextMod { TextMod::Weight(v.0 as f32) }
+fn fn_weight(v: SchemeNumber) -> TextMod { TextMod::Weight(parley::FontWeight::new(v.0 as f32)) }
+fn fn_italic() -> TextMod { TextMod::Italic }
+fn fn_link_color(c: SchemeColor) -> TextMod { TextMod::LinkColor(c.0) }
+fn fn_code_family(s: String) -> TextMod { TextMod::CodeFamily(s) }
+fn fn_line_height(v: SchemeNumber) -> TextMod { TextMod::LineHeight(v.0 as f32) }
 
 fn fn_text_align(val: SteelVal) -> Result<TextMod, String> {
     let s = symbol_str(&val, "align")?;
@@ -477,19 +495,60 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
 }
 
 /// `(text "Hello" (size 15) (color (hex "#000")) ...)`
-fn fn_make_text(content: SteelVal, mods: SteelVal) -> Result<SchemeRichText, String> {
+pub(crate) fn fn_make_text(
+    content: SteelVal,
+    mods: SteelVal,
+    content_opt: &Option<String>,
+    entities_opt: &Option<Vec<serde_json::Value>>,
+) -> Result<SchemeRichText, String> {
     let text_str = match &content {
         SteelVal::StringV(s) => s.to_string(),
         other => return Err(format!("text: first argument must be a string, got {:?}", other)),
     };
 
     let mod_list = steel_list_to_vec(&mods)?;
-    let mut rich = RichText::plain(text_str);
+    let mut rich = RichText::plain(&text_str);
+
+    let mut link_color = vello::peniko::Color::from_rgb8(80, 150, 240);
+    let mut code_family = "monospace".to_string();
 
     for item in &mod_list {
         let m = TextMod::from_steelval(item)
             .map_err(|e| format!("text: expected text modifier, got {:?} ({})", item, e))?;
+            
+        if let TextMod::LinkColor(c) = m {
+            link_color = c;
+        } else if let TextMod::CodeFamily(f) = &m {
+            code_family = f.clone();
+        }
+        
         m.apply(&mut rich);
+    }
+    
+    // Eagerly inject entities if this text matches the payload content
+    if let (Some(content_str), Some(entities)) = (content_opt, entities_opt) {
+        if let Some(base_offset) = rich.text.find(content_str) {
+            for ent in entities {
+                let t = ent.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                let offset = base_offset + ent.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let length = ent.get("length").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                
+                let mut span = crate::primitives::text::Span::new(offset..(offset + length));
+                match t {
+                    "bold" => span.weight = Some(parley::FontWeight::BOLD),
+                    "italic" => span.italic = Some(true),
+                    "underline" => span.underline = Some(true),
+                    "strikethrough" => span.strikethrough = Some(true),
+                    "code" | "pre" => span.font_family = Some(code_family.clone()),
+                    "text_link" | "url" => {
+                        span.color = Some(link_color);
+                        span.underline = Some(true);
+                    },
+                    _ => {}
+                }
+                rich.spans.push(span);
+            }
+        }
     }
 
     Ok(SchemeRichText(rich))
@@ -514,6 +573,123 @@ fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, St
     Ok(SchemeNode(Node {
         style: Style::default(),
         content: Content::Shape { kind: kind.0, fill, stroke },
+    }))
+}
+
+/// `(image "base64data..." (circle))` or `(image "base64data...")`
+fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
+    let b64_str = match &data {
+        SteelVal::StringV(s) => s.to_string(),
+        other => return Err(format!("image: first argument must be a base64 string, got {:?}", other)),
+    };
+
+    // Base64 decode
+    let bytes = BASE64_STANDARD.decode(&b64_str)
+        .map_err(|e| format!("image: invalid base64: {}", e))?;
+
+    // Decode image (JPEG, PNG, WebP, etc.)
+    let img = image::load_from_memory(&bytes)
+        .map_err(|e| format!("image: failed to decode image: {}", e))?;
+    let rgba = img.to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+
+    // Create vello ImageData + ImageBrush
+    let vello_image = vello::peniko::ImageData {
+        data: vello::peniko::Blob::new(Arc::new(rgba.into_raw())),
+        format: vello::peniko::ImageFormat::Rgba8,
+        alpha_type: vello::peniko::ImageAlphaType::Alpha,
+        width: w,
+        height: h,
+    };
+    let image_brush = Arc::new(ImageBrush::new(vello_image));
+
+    // Parse optional clip shape from args
+    let arg_list = steel_list_to_vec(&args)?;
+    let clip = if let Some(item) = arg_list.first() {
+        Some(SchemeShapeKind::from_steelval(item)
+            .map_err(|e| format!("image: expected clip shape, got {:?} ({})", item, e))?.0)
+    } else {
+        None
+    };
+
+    Ok(SchemeNode(Node::image(image_brush, clip)))
+}
+
+/// Radial gradient: `(radial-gradient (stop 0 (hex "#fff")) (stop 100 (hex "#000")))`
+/// Optionally with center/radius overrides via number pairs.
+fn fn_make_radial_gradient(args: SteelVal) -> Result<SchemePaint, String> {
+    let list = steel_list_to_vec(&args)?;
+
+    // Shorthand: two colors
+    if list.len() == 2
+        && SchemeColor::from_steelval(&list[0]).is_ok()
+        && SchemeColor::from_steelval(&list[1]).is_ok()
+    {
+        let inner = SchemeColor::from_steelval(&list[0]).unwrap();
+        let outer = SchemeColor::from_steelval(&list[1]).unwrap();
+        return Ok(SchemePaint(Paint::RadialGradient {
+            center: (0.5, 0.5),
+            radius: 0.5,
+            stops: vec![
+                Stop { offset: 0.0, color: inner.0 },
+                Stop { offset: 1.0, color: outer.0 },
+            ],
+            extend: Default::default(),
+        }));
+    }
+
+    let mut stops: Vec<Stop> = Vec::new();
+    for item in &list {
+        if let Ok(s) = SchemeStop::from_steelval(item) {
+            stops.push(Stop { offset: s.offset, color: s.color });
+        } else {
+            return Err(format!("radial-gradient: unexpected argument: {:?}", item));
+        }
+    }
+
+    if stops.len() < 2 {
+        return Err("radial-gradient: need exactly 2 colors OR at least 2 stops".to_string());
+    }
+
+    Ok(SchemePaint(Paint::RadialGradient {
+        center: (0.5, 0.5),
+        radius: 0.5,
+        stops,
+        extend: Default::default(),
+    }))
+}
+
+/// Sweep gradient: `(sweep-gradient (angle 0) (angle 360) (stop 0 ...) (stop 100 ...))`
+/// First two `angle` args are start and end angles.
+fn fn_make_sweep_gradient(args: SteelVal) -> Result<SchemePaint, String> {
+    let list = steel_list_to_vec(&args)?;
+
+    let mut angles: Vec<f32> = Vec::new();
+    let mut stops: Vec<Stop> = Vec::new();
+
+    for item in &list {
+        if let Ok(a) = SchemeAngle::from_steelval(item) {
+            angles.push(a.0 as f32);
+        } else if let Ok(s) = SchemeStop::from_steelval(item) {
+            stops.push(Stop { offset: s.offset, color: s.color });
+        } else {
+            return Err(format!("sweep-gradient: unexpected argument: {:?}", item));
+        }
+    }
+
+    let start_angle = angles.first().copied().unwrap_or(0.0);
+    let end_angle = angles.get(1).copied().unwrap_or(360.0);
+
+    if stops.len() < 2 {
+        return Err("sweep-gradient: need at least 2 stops".to_string());
+    }
+
+    Ok(SchemePaint(Paint::SweepGradient {
+        center: (0.5, 0.5),
+        start_angle,
+        end_angle,
+        stops,
+        extend: Default::default(),
     }))
 }
 
