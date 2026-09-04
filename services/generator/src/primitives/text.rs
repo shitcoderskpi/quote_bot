@@ -1,9 +1,3 @@
-//! Rich text: a plain string plus a list of styled spans (font family,
-//! size, weight, italic, color/paint, line height), laid out with `parley`
-//! and re-wrapped to whatever width the box resolves to. Height is
-//! intrinsic -- it comes out of the layout, which is what lets a text node
-//! act like an "auto" box on the cross axis.
-
 use crate::primitives::Viewport;
 use parley::{
     Alignment, FontContext, FontWeight, GenericFamily, Layout, LayoutContext,
@@ -21,7 +15,7 @@ pub struct Span {
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub strikethrough: Option<bool>,
-    pub color: Option<vello::peniko::Color>,
+    pub color: Option<peniko::Color>,
     pub line_height: Option<f32>,
 }
 
@@ -62,7 +56,6 @@ pub struct RichText {
     pub default_underline: bool,
     pub default_strikethrough: bool,
     pub default_line_height: Option<f32>,
-    /// Root font size, used to resolve `Em` lengths inside this block.
     pub root_font_size: f64,
 }
 
@@ -73,8 +66,8 @@ impl RichText {
             spans: Vec::new(),
             align: TextAlign::Start,
             default_font_size: 16.0,
-            default_family: "system-ui".to_string(),
-            default_color: vello::peniko::Color::BLACK,
+            default_family: "sans-serif".to_string(),
+            default_color: peniko::Color::BLACK,
             default_weight: FontWeight::NORMAL,
             default_italic: false,
             default_underline: false,
@@ -89,9 +82,6 @@ impl RichText {
         self
     }
 
-    /// Build and word-wrap a parley layout for this text at a given
-    /// resolved box width. Pass `None` for `max_width` to measure at
-    /// intrinsic (unwrapped) width instead -- useful for "auto" width boxes.
     pub fn layout(
         &self,
         font_cx: &mut FontContext,

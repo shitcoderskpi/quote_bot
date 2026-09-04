@@ -1,8 +1,3 @@
-//! Steel Scheme template engine.
-//! Templates are `.scm` files that call registered Rust functions to build
-//! a `Node` tree. The engine evaluates the script and extracts the final
-//! `SchemeNode` from the result.
-
 mod types;
 mod functions;
 
@@ -31,8 +26,7 @@ impl Templater {
         entities_opt: Option<Vec<serde_json::Value>>,
     ) -> Result<Node, Box<dyn std::error::Error>> {
         let mut payload_val: serde_json::Value = serde_json::from_str(payload_json)?;
-        
-        // Calculate avatar initials and gradient colors in Rust
+
         if let Some(obj) = payload_val.as_object_mut() {
             let username = obj.get("username").and_then(|v| v.as_str()).unwrap_or("");
             let initials = username
@@ -51,7 +45,7 @@ impl Templater {
                 3 => ("#51BB3F", "#8AE451"), // Green
                 4 => ("#34C6CD", "#4CE9C2"), // Cyan
                 5 => ("#549CFF", "#3CB9FE"), // Blue
-                _ => ("#F2799B", "#F27DF2"), // Pink (6)
+                _ => ("#F2799B", "#F27DF2"), // Pink
             };
             obj.insert("avatar_color_top".to_string(), serde_json::Value::String(colors.0.to_string()));
             obj.insert("avatar_color_bottom".to_string(), serde_json::Value::String(colors.1.to_string()));
@@ -84,14 +78,12 @@ impl Templater {
     }
 }
 
-/// Extract a `Node` from the final `SteelVal` returned by the template.
 fn extract_node(val: &SteelVal) -> Result<Node, Box<dyn std::error::Error>> {
     let scheme_node = SchemeNode::from_steelval(val)
         .map_err(|e| format!("Template must return a (node ...), got: {:?} ({})", val, e))?;
     Ok(scheme_node.0)
 }
 
-/// Convert a serde_json::Value into a Steel Scheme association list literal.
 fn json_to_scheme(val: &serde_json::Value) -> String {
     match val {
         serde_json::Value::Null => "'()".to_string(),

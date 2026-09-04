@@ -1,7 +1,3 @@
-//! Shape kinds. A `ShapeKind` is unit-aware where it makes sense (corner
-//! radii, circle radius) and turns into a `kurbo` geometry the vello `Scene`
-//! can fill/stroke/clip with, once given a concrete box to sit in.
-
 use crate::primitives::Viewport;
 use vello::kurbo::{BezPath, Circle, Ellipse, Point, Rect, RoundedRect, RoundedRectRadii, Shape};
 
@@ -24,15 +20,10 @@ impl Corners {
 
 #[derive(Clone, Debug)]
 pub enum ShapeKind {
-    /// A rounded rectangle; radii can be 0.
     Rect { corners: Corners },
-    /// A circle.
     Circle,
-    /// Ellipse filling the box (rx = w/2, ry = h/2 by default).
     Ellipse,
-    /// An arbitrary SVG-style path data string (e.g. "M 0 0 L 10 10 Z").
     Path { data: String },
-    /// Intersect with another shape.
     Clip(Box<ShapeKind>),
 }
 

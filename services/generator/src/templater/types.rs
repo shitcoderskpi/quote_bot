@@ -1,7 +1,3 @@
-//! Opaque wrapper types that Steel Scheme manipulates as values.
-//! Each implements `Custom` (via the blanket `Sealed` impl on `Any`)
-//! so `register_fn` can accept and return them transparently.
-
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::Paint;
 use crate::primitives::shape::{Corners, ShapeKind};
@@ -9,9 +5,6 @@ use crate::primitives::text::RichText;
 use steel::rvals::{Custom, FromSteelVal, SteelVal};
 use taffy::prelude::*;
 
-// ── Number Helper ────────────────────────────────────────────
-
-/// Transparently parses both Scheme integers and floats into an f64.
 #[derive(Clone, Copy, Debug)]
 pub struct SchemeNumber(pub f64);
 
@@ -28,13 +21,10 @@ impl FromSteelVal for SchemeNumber {
     }
 }
 
-// ── Dimension ────────────────────────────────────────────────
-
-/// A resolved dimension value (px/pt/pct/auto) that style modifiers consume.
 #[derive(Clone, Debug)]
 pub enum SchemeDimension {
-    Length(f32),   // already in px
-    Percent(f32),  // 0.0–1.0
+    Length(f32),
+    Percent(f32),
     Auto,
 }
 
@@ -74,19 +64,13 @@ impl SchemeDimension {
     }
 }
 
-// ── Color ────────────────────────────────────────────────────
-
 #[derive(Clone, Debug)]
 pub struct SchemeColor(pub vello::peniko::Color);
 impl Custom for SchemeColor {}
 
-// ── Paint ────────────────────────────────────────────────────
-
 #[derive(Clone, Debug)]
 pub struct SchemePaint(pub Paint);
 impl Custom for SchemePaint {}
-
-// ── Gradient helpers ─────────────────────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct SchemeAngle(pub f64);
@@ -99,15 +83,25 @@ pub struct SchemeStop {
 }
 impl Custom for SchemeStop {}
 
-// ── Shape ────────────────────────────────────────────────────
-
 #[derive(Clone, Debug)]
-pub struct SchemeShapeKind(pub ShapeKind);
+pub struct SchemeShapeKind {
+    pub kind: ShapeKind,
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+}
+
+impl SchemeShapeKind {
+    pub fn new(kind: ShapeKind) -> Self {
+        Self { kind, width: None, height: None }
+    }
+
+    pub fn with_size(kind: ShapeKind, w: f32, h: f32) -> Self {
+        Self { kind, width: Some(w), height: Some(h) }
+    }
+}
+
 impl Custom for SchemeShapeKind {}
 
-// ── Style modifier ───────────────────────────────────────────
-
-/// A modifier that patches one field of a `Style`. Collected by `(style ...)`.
 #[derive(Clone, Debug)]
 pub enum StyleMod {
     Direction(FlexDirection),
@@ -214,9 +208,6 @@ impl StyleMod {
     }
 }
 
-// ── Text modifier ────────────────────────────────────────────
-
-/// A modifier that patches one field of a `RichText`. Collected by `(text ...)` and `(span ...)`.
 #[derive(Clone, Debug)]
 pub enum TextMod {
     Size(SchemeDimension),
@@ -240,7 +231,7 @@ impl TextMod {
             TextMod::Size(d) => {
                 let s = match d {
                     SchemeDimension::Length(l) => *l as f64,
-                    SchemeDimension::Percent(p) => (rich.root_font_size * (*p as f64)),
+                    SchemeDimension::Percent(p) => rich.root_font_size * (*p as f64),
                     SchemeDimension::Auto => rich.root_font_size,
                 };
                 rich.default_font_size = s;
@@ -254,12 +245,10 @@ impl TextMod {
             TextMod::Strikethrough => rich.default_strikethrough = true,
             TextMod::LineHeight(lh) => rich.default_line_height = Some(*lh),
             TextMod::Align(a) => rich.align = *a,
-            TextMod::LinkColor(_) | TextMod::CodeFamily(_) => {} // Handled during eager entity injection
+            TextMod::LinkColor(_) | TextMod::CodeFamily(_) => {}
         }
     }
 }
-
-// ── Fill / Stroke wrappers for shape ─────────────────────────
 
 #[derive(Clone, Debug)]
 pub enum ShapeMod {
@@ -268,19 +257,13 @@ pub enum ShapeMod {
 }
 impl Custom for ShapeMod {}
 
-// ── Node (final output) ─────────────────────────────────────
-
 #[derive(Clone, Debug)]
 pub struct SchemeNode(pub Node);
 impl Custom for SchemeNode {}
 
-// ── Style (assembled from mods) ──────────────────────────────
-
 #[derive(Clone, Debug)]
 pub struct SchemeStyle(pub Style);
 impl Custom for SchemeStyle {}
-
-// ── Rich text (assembled from mods) ──────────────────────────
 
 #[derive(Clone, Debug)]
 pub struct SchemeRichText(pub RichText);

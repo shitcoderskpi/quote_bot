@@ -4,14 +4,13 @@ use parley::{FontContext, LayoutContext};
 use vello::kurbo::{Affine, Rect as KRect, Shape, Stroke as KStroke};
 use vello::peniko::{BlendMode, Brush, Fill, ImageBrush};
 use vello::Scene;
-use std::sync::{Arc, Mutex};
 use taffy::prelude::*;
 use parley::layout::{PositionedLayoutItem, Glyph as ParleyGlyph};
 use vello::Glyph;
 
 pub struct Renderer {
-    font_cx: Arc<Mutex<FontContext>>,
-    layout_cx: Arc<Mutex<LayoutContext<Brush>>>,
+    font_cx: FontContext,
+    layout_cx: LayoutContext<Brush>,
     taffy: TaffyTree<Content>,
     root_id: Option<NodeId>,
 }
@@ -19,8 +18,8 @@ pub struct Renderer {
 impl Renderer {
     pub fn new() -> Self {
         Self {
-            font_cx: Arc::new(Mutex::new(FontContext::new())),
-            layout_cx: Arc::new(Mutex::new(LayoutContext::new())),
+            font_cx: FontContext::new(),
+            layout_cx: LayoutContext::new(),
             taffy: TaffyTree::new(),
             root_id: None,
         }
@@ -31,16 +30,14 @@ impl Renderer {
         let root_id = self.build_taffy_tree(node, viewport);
         self.root_id = Some(root_id);
         
-        let font_cx = self.font_cx.clone();
-        let layout_cx = self.layout_cx.clone();
+        let font_cx = &mut self.font_cx;
+        let layout_cx = &mut self.layout_cx;
         
         self.taffy.compute_layout_with_measure(
             root_id,
             Size { width: AvailableSpace::Definite(1000.0), height: AvailableSpace::Definite(1000.0) },
             |known_dims, avail_space, _id, ctx, _tree| {
                 if let Some(Content::Text(rich)) = ctx {
-                    let mut fcx = font_cx.lock().unwrap();
-                    let mut lcx = layout_cx.lock().unwrap();
                     let max_width = known_dims.width.map(|w| w as f64).or_else(|| {
                         if let AvailableSpace::Definite(w) = avail_space.width {
                             Some(w as f64)
@@ -49,7 +46,7 @@ impl Renderer {
                         }
                     });
                     
-                    let layout = rich.layout(&mut fcx, &mut lcx, max_width, viewport);
+                    let layout = rich.layout(font_cx, layout_cx, max_width, viewport);
                     Size { width: layout.width(), height: layout.height() }
                 } else if let Some(Content::Image { image, .. }) = ctx {
                     let iw = image.image.width as f32;
@@ -94,7 +91,7 @@ impl Renderer {
         }
     }
 
-    fn render_taffy_tree(&self, scene: &mut Scene, id: NodeId, node: &Node, parent_transform: Affine, viewport: Viewport, font_size: f64) {
+    fn render_taffy_tree(&mut self, scene: &mut Scene, id: NodeId, node: &Node, parent_transform: Affine, viewport: Viewport, font_size: f64) {
         let layout = self.taffy.layout(id).unwrap();
         
         let x = layout.location.x as f64;
@@ -126,9 +123,7 @@ impl Renderer {
                 }
             }
             Content::Text(rich) => {
-                let mut fcx = self.font_cx.lock().unwrap();
-                let mut lcx = self.layout_cx.lock().unwrap();
-                let text_layout = rich.layout(&mut fcx, &mut lcx, Some(w), viewport);
+                let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w), viewport);
                 draw_text_layout(scene, transform, &text_layout);
             }
             Content::Image { image, clip } => {

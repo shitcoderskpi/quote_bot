@@ -4,14 +4,11 @@ use crate::primitives::text::RichText;
 use vello::peniko::ImageBrush;
 use std::sync::Arc;
 
-/// Layout/paint properties shared by every node, all unit-flexible.
 #[derive(Clone, Debug)]
 pub struct Style {
     pub layout: taffy::Style,
     pub rotate_deg: f64,
     pub opacity: f32,
-    /// Optional clip mask applied to this node and its children, resolved
-    /// against this node's own box.
     pub clip: Option<ShapeKind>,
 }
 
@@ -30,9 +27,6 @@ impl Default for Style {
 pub enum Content {
     Shape { kind: ShapeKind, fill: Option<Paint>, stroke: Option<Stroke> },
     Text(RichText),
-    /// An image clipped into `clip` (defaults to the box rect if `None`),
-    /// scaled to fill the resolved box -- this is the "images in various
-    /// shapes" case (circular avatar, rounded thumbnail, arbitrary path).
     Image { image: Arc<ImageBrush>, clip: Option<ShapeKind> },
     Group(Vec<Node>),
 }

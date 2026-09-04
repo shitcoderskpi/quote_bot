@@ -35,15 +35,11 @@ fn process_job(
 
     // println!("Parsed Node Tree: {:#?}", node_tree);
 
-    // The output dimensions can be inferred from the tree size, or fixed canvas.
-    // For now, let's fix a default canvas or extract it from the root node if possible.
-    // We'll use 512x512 as an initial working canvas for testing if size is Auto.
-    let viewport = primitives::Viewport { width: 1000.0, height: 1000.0 };
+    let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
     
     // Measure the tree to determine the actual image dimensions!
     let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport, 16.0);
-    
-    // Use the measured dimensions (plus a little padding if you want)
+
     let width  = measured_w;
     let height = measured_h;
 

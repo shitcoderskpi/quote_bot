@@ -1,7 +1,3 @@
-//! Fill/stroke paint: solid colors and linear/radial/sweep gradients, all
-//! expressed with relative endpoints (0.0 to 1.0) so gradients can be positioned
-//! relatively (e.g. "from 0% to 100% of the box").
-
 use crate::primitives::Viewport;
 use vello::peniko::{Brush, Color, ColorStop, ColorStops, Extend, Gradient};
 
@@ -47,11 +43,7 @@ impl Paint {
             .as_slice()
             .into()
     }
-
-    /// Resolve this paint against a concrete box (in local coordinates,
-    /// origin at the box's top-left, `box_w`/`box_h` its resolved size) and
-    /// the current viewport/font-size context, producing the `peniko::Brush`
-    /// vello actually draws with.
+    
     pub fn to_brush(&self, box_w: f64, box_h: f64, _viewport: Viewport, _font_size: f64) -> Brush {
         match self {
             Paint::Solid(c) => Brush::Solid(*c),

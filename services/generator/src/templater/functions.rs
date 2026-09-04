@@ -1,7 +1,3 @@
-//! All Rust functions registered into the Steel engine.
-//! Organized by domain: units, colors, paints, shapes, style mods, text mods,
-//! node constructors.
-
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
@@ -16,39 +12,21 @@ use vello::peniko::ImageBrush;
 
 use super::types::*;
 
-// ═══════════════════════════════════════════════════════════════
-//  Registration entry point
-// ═══════════════════════════════════════════════════════════════
-
 pub fn register_all(engine: &mut Engine) {
-    // ── Units ────────────────────────────────────────────────
     engine.register_fn("px", fn_px);
     engine.register_fn("pt", fn_pt);
     engine.register_fn("pct", fn_pct);
     engine.register_fn("auto", fn_auto);
-
-    // ── Colors ───────────────────────────────────────────────
     engine.register_fn("hex", fn_hex);
     engine.register_fn("rgb", fn_rgb);
     engine.register_fn("rgba", fn_rgba);
-
-    // ── Paints ───────────────────────────────────────────────
     engine.register_fn("solid", fn_solid);
-
-    // ── Gradient helpers ─────────────────────────────────────
     engine.register_fn("angle", fn_angle);
     engine.register_fn("stop", fn_stop);
-
-    // ── Shapes ───────────────────────────────────────────────
-    engine.register_fn("circle", fn_circle);
-    engine.register_fn("rect", fn_rect);
+    engine.register_fn("%make-circle", fn_make_circle);
     engine.register_fn("svg-path", fn_svg_path);
-
-    // ── Fill / Stroke wrappers ───────────────────────────────
     engine.register_fn("fill", fn_fill);
     engine.register_fn("stroke", fn_stroke);
-
-    // ── Style property functions (value args) ────────────────
     engine.register_fn("direction", fn_direction);
     engine.register_fn("align-items", fn_align_items);
     engine.register_fn("justify-content", fn_justify_content);
@@ -74,8 +52,6 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("left", |d: SchemeDimension| StyleMod::InsetSide { side: Side::Left, dim: d });
     engine.register_fn("opacity", fn_opacity);
     engine.register_fn("rotate", fn_rotate);
-
-    // ── Convenience aliases ──────────────────────────────────
     engine.register_fn("flex-row", || StyleMod::Direction(FlexDirection::Row));
     engine.register_fn("flex-column", || StyleMod::Direction(FlexDirection::Column));
     engine.register_fn("align-start", || StyleMod::AlignItems(Some(AlignItems::FLEX_START)));
@@ -87,8 +63,6 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("hidden", || StyleMod::Display(Display::None));
     engine.register_fn("absolute", || StyleMod::Position(Position::Absolute));
     engine.register_fn("relative", || StyleMod::Position(Position::Relative));
-
-    // ── Text modifiers ───────────────────────────────────────
     engine.register_fn("size", fn_size);
     engine.register_fn("color", fn_color);
     engine.register_fn("family", fn_family);
@@ -100,27 +74,23 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("code-family", fn_code_family);
     engine.register_fn("line-height", fn_line_height);
     engine.register_fn("align", fn_text_align);
-
-    // ── Utility ──────────────────────────────────────────────
     engine.register_fn("string-byte-length", |s: String| s.len());
-
-    // ── Varargs constructors (Scheme wrappers around Rust impls) ──
     engine.register_fn("%make-style", fn_make_style);
     engine.register_fn("%make-node", fn_make_node);
-
     engine.register_fn("%make-shape", fn_make_shape);
     engine.register_fn("%make-linear-gradient", fn_make_linear_gradient);
     engine.register_fn("%make-radial-gradient", fn_make_radial_gradient);
     engine.register_fn("%make-sweep-gradient", fn_make_sweep_gradient);
     engine.register_fn("%make-rounded-rect", fn_make_rounded_rect);
+    engine.register_fn("%make-rect", fn_make_rect);
     engine.register_fn("%make-padding", fn_make_padding);
     engine.register_fn("%make-image", fn_make_image);
-
-    // Inject thin Scheme wrappers that collect rest-args into lists
     engine
         .compile_and_run_raw_program(
             r#"
             (define (style . mods) (%make-style mods))
+            (define (circle . args) (%make-circle args))
+            (define (rect . args) (%make-rect args))
             (define (node . args) (%make-node args))
             (define (shape kind . mods) (%make-shape kind mods))
             (define (linear-gradient . args) (%make-linear-gradient args))
@@ -133,11 +103,6 @@ pub fn register_all(engine: &mut Engine) {
         )
         .expect("Failed to register Scheme wrapper functions");
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Unit / Dimension
-// ═══════════════════════════════════════════════════════════════
-
 fn fn_px(v: SchemeNumber) -> SchemeDimension {
     SchemeDimension::Length(v.0 as f32)
 }
@@ -153,10 +118,6 @@ fn fn_pct(v: SchemeNumber) -> SchemeDimension {
 fn fn_auto() -> SchemeDimension {
     SchemeDimension::Auto
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Colors
-// ═══════════════════════════════════════════════════════════════
 
 fn fn_hex(s: String) -> Result<SchemeColor, String> {
     parse_hex_color(&s)
@@ -188,16 +149,9 @@ fn parse_hex_color(hex: &str) -> Option<vello::peniko::Color> {
         None
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Paints
-// ═══════════════════════════════════════════════════════════════
-
 fn fn_solid(c: SchemeColor) -> SchemePaint {
     SchemePaint(Paint::Solid(c.0))
 }
-
-// ── Gradient helpers ─────────────────────────────────────────
 
 fn fn_angle(deg: SchemeNumber) -> SchemeAngle {
     SchemeAngle(deg.0)
@@ -210,12 +164,9 @@ fn fn_stop(pct: SchemeNumber, color: SchemeColor) -> SchemeStop {
     }
 }
 
-/// Shorthand: `(linear-gradient COLOR COLOR)`
-/// Advanced: `(linear-gradient (angle 45) (stop 0 (hex "#f00")) (stop 100 (hex "#00f")))`
 fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     let list = steel_list_to_vec(&args)?;
 
-    // Check for shorthand (exactly two colors)
     if list.len() == 2 && SchemeColor::from_steelval(&list[0]).is_ok() && SchemeColor::from_steelval(&list[1]).is_ok() {
         let top = SchemeColor::from_steelval(&list[0]).unwrap();
         let bottom = SchemeColor::from_steelval(&list[1]).unwrap();
@@ -230,7 +181,7 @@ fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
         }));
     }
 
-    let mut angle_deg: f64 = 0.0; // default: top→bottom
+    let mut angle_deg: f64 = 0.0;
     let mut stops: Vec<Stop> = Vec::new();
 
     for item in &list {
@@ -247,10 +198,8 @@ fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
         return Err("linear-gradient: need exactly 2 colors OR at least 2 stops".to_string());
     }
 
-    // Convert angle (CSS convention: 0° = bottom→top, 90° = left→right)
     let rad = (angle_deg - 90.0_f64).to_radians();
     let (dx, dy) = (rad.cos(), rad.sin());
-    // Map direction vector to 0..1 coordinates
     let start = (0.5 - dx / 2.0, 0.5 - dy / 2.0);
     let end = (0.5 + dx / 2.0, 0.5 + dy / 2.0);
 
@@ -262,19 +211,42 @@ fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     }))
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Shapes
-// ═══════════════════════════════════════════════════════════════
-
-fn fn_circle() -> SchemeShapeKind {
-    SchemeShapeKind(ShapeKind::Circle)
+fn fn_make_circle(args: SteelVal) -> Result<SchemeShapeKind, String> {
+    let list = steel_list_to_vec(&args)?;
+    if list.is_empty() {
+        Ok(SchemeShapeKind::new(ShapeKind::Circle))
+    } else if list.len() == 1 {
+        let d = SchemeDimension::from_steelval(&list[0])
+            .map_err(|_| format!("circle: expected dimension, got {:?}", list[0]))?;
+        let v = d.to_f64() as f32;
+        Ok(SchemeShapeKind::with_size(ShapeKind::Circle, v, v))
+    } else if list.len() == 2 {
+        let w = SchemeDimension::from_steelval(&list[0]).map_err(|_| "circle: expected 1st arg to be dimension")?;
+        let h = SchemeDimension::from_steelval(&list[1]).map_err(|_| "circle: expected 2nd arg to be dimension")?;
+        Ok(SchemeShapeKind::with_size(ShapeKind::Circle, w.to_f64() as f32, h.to_f64() as f32))
+    } else {
+        Err(format!("circle: expected 0, 1, or 2 arguments, got {}", list.len()))
+    }
 }
 
-fn fn_rect() -> SchemeShapeKind {
-    SchemeShapeKind(ShapeKind::Rect { corners: Corners::zero() })
+fn fn_make_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
+    let list = steel_list_to_vec(&args)?;
+    if list.is_empty() {
+        Ok(SchemeShapeKind::new(ShapeKind::Rect { corners: Corners::zero() }))
+    } else if list.len() == 1 {
+        let d = SchemeDimension::from_steelval(&list[0])
+            .map_err(|_| format!("rect: expected dimension, got {:?}", list[0]))?;
+        let v = d.to_f64() as f32;
+        Ok(SchemeShapeKind::with_size(ShapeKind::Rect { corners: Corners::zero() }, v, v))
+    } else if list.len() == 2 {
+        let w = SchemeDimension::from_steelval(&list[0]).map_err(|_| "rect: expected 1st arg to be dimension")?;
+        let h = SchemeDimension::from_steelval(&list[1]).map_err(|_| "rect: expected 2nd arg to be dimension")?;
+        Ok(SchemeShapeKind::with_size(ShapeKind::Rect { corners: Corners::zero() }, w.to_f64() as f32, h.to_f64() as f32))
+    } else {
+        Err(format!("rect: expected 0, 1, or 2 arguments, got {}", list.len()))
+    }
 }
 
-/// `(rounded-rect DIM)` or `(rounded-rect TL TR BR BL)`
 fn fn_make_rounded_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
     let list = steel_list_to_vec(&args)?;
     
@@ -282,13 +254,13 @@ fn fn_make_rounded_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
         let r = SchemeDimension::from_steelval(&list[0])
             .map_err(|_| format!("rounded-rect: expected dimension, got {:?}", list[0]))?;
         let v = r.to_f64();
-        Ok(SchemeShapeKind(ShapeKind::Rect { corners: Corners::all(v) }))
+        Ok(SchemeShapeKind::new(ShapeKind::Rect { corners: Corners::all(v) }))
     } else if list.len() == 4 {
         let tl = SchemeDimension::from_steelval(&list[0]).map_err(|_| "rounded-rect: expected 1st arg to be dimension")?;
         let tr = SchemeDimension::from_steelval(&list[1]).map_err(|_| "rounded-rect: expected 2nd arg to be dimension")?;
         let br = SchemeDimension::from_steelval(&list[2]).map_err(|_| "rounded-rect: expected 3rd arg to be dimension")?;
         let bl = SchemeDimension::from_steelval(&list[3]).map_err(|_| "rounded-rect: expected 4th arg to be dimension")?;
-        Ok(SchemeShapeKind(ShapeKind::Rect {
+        Ok(SchemeShapeKind::new(ShapeKind::Rect {
             corners: Corners {
                 top_left: tl.to_f64(),
                 top_right: tr.to_f64(),
@@ -302,10 +274,8 @@ fn fn_make_rounded_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
 }
 
 fn fn_svg_path(d: String) -> SchemeShapeKind {
-    SchemeShapeKind(ShapeKind::Path { data: d })
+    SchemeShapeKind::new(ShapeKind::Path { data: d })
 }
-
-// ── Fill / Stroke ────────────────────────────────────────────
 
 fn fn_fill(paint: SchemePaint) -> ShapeMod {
     ShapeMod::Fill(paint.0)
@@ -317,10 +287,6 @@ fn fn_stroke(paint: SchemePaint, width: SchemeNumber) -> ShapeMod {
         _ => vello::peniko::Color::BLACK,
     }})
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Style property functions (accept value arg, return StyleMod)
-// ═══════════════════════════════════════════════════════════════
 
 fn fn_direction(val: SteelVal) -> Result<StyleMod, String> {
     let s = symbol_str(&val, "direction")?;
@@ -425,10 +391,6 @@ fn fn_inset(
 fn fn_opacity(v: SchemeNumber) -> StyleMod { StyleMod::Opacity(v.0 as f32) }
 fn fn_rotate(v: SchemeNumber) -> StyleMod { StyleMod::Rotate(v.0) }
 
-// ═══════════════════════════════════════════════════════════════
-//  Text modifiers
-// ═══════════════════════════════════════════════════════════════
-
 fn fn_size(d: SchemeDimension) -> TextMod { TextMod::Size(d) }
 fn fn_color(c: SchemeColor) -> TextMod { TextMod::Color(c.0) }
 fn fn_family(s: String) -> TextMod { TextMod::Family(s) }
@@ -448,12 +410,6 @@ fn fn_text_align(val: SteelVal) -> Result<TextMod, String> {
         _ => Err(format!("align: unknown value '{}', expected: start, center, end, justify", s)),
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Varargs constructors (called from Scheme wrappers)
-// ═══════════════════════════════════════════════════════════════
-
-/// `(style (direction 'row) (padding (px 10)) ...)`
 fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, String> {
     let list = steel_list_to_vec(&mods)?;
     let mut style = Style::default();
@@ -464,8 +420,6 @@ fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, String> {
     }
     Ok(SchemeStyle(style))
 }
-
-/// `(node [style] children...)`
 fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
     let list = steel_list_to_vec(&args)?;
     let mut style = Style::default();
@@ -479,7 +433,7 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
         } else if let Ok(t) = SchemeRichText::from_steelval(item) {
             children.push(Node::text(t.0));
         } else if is_void_or_empty(item) {
-            continue; // skip '() from conditional (if ...) that returned false
+            continue;
         } else {
             return Err(format!("node: unexpected argument: {:?}", item));
         }
@@ -494,7 +448,6 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
     Ok(SchemeNode(Node { style, content }))
 }
 
-/// `(text "Hello" (size 15) (color (hex "#000")) ...)`
 pub(crate) fn fn_make_text(
     content: SteelVal,
     mods: SteelVal,
@@ -525,7 +478,6 @@ pub(crate) fn fn_make_text(
         m.apply(&mut rich);
     }
     
-    // Eagerly inject entities if this text matches the payload content
     if let (Some(content_str), Some(entities)) = (content_opt, entities_opt) {
         if let Some(base_offset) = rich.text.find(content_str) {
             for ent in entities {
@@ -540,10 +492,14 @@ pub(crate) fn fn_make_text(
                     "underline" => span.underline = Some(true),
                     "strikethrough" => span.strikethrough = Some(true),
                     "code" | "pre" => span.font_family = Some(code_family.clone()),
-                    "text_link" | "url" => {
+                    "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
+                    "phone_number" | "text_mention" => {
                         span.color = Some(link_color);
                         span.underline = Some(true);
                     },
+                    "bot_command" => {
+                        span.color = Some(link_color);
+                    }
                     _ => {}
                 }
                 rich.spans.push(span);
@@ -554,7 +510,6 @@ pub(crate) fn fn_make_text(
     Ok(SchemeRichText(rich))
 }
 
-/// `(shape (circle) (fill (solid (hex "#FFF"))))`
 fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, String> {
     let mod_list = steel_list_to_vec(&mods)?;
 
@@ -572,28 +527,24 @@ fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, St
 
     Ok(SchemeNode(Node {
         style: Style::default(),
-        content: Content::Shape { kind: kind.0, fill, stroke },
+        content: Content::Shape { kind: kind.kind, fill, stroke },
     }))
 }
 
-/// `(image "base64data..." (circle))` or `(image "base64data...")`
 fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
     let b64_str = match &data {
         SteelVal::StringV(s) => s.to_string(),
         other => return Err(format!("image: first argument must be a base64 string, got {:?}", other)),
     };
 
-    // Base64 decode
     let bytes = BASE64_STANDARD.decode(&b64_str)
         .map_err(|e| format!("image: invalid base64: {}", e))?;
 
-    // Decode image (JPEG, PNG, WebP, etc.)
     let img = image::load_from_memory(&bytes)
         .map_err(|e| format!("image: failed to decode image: {}", e))?;
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
 
-    // Create vello ImageData + ImageBrush
     let vello_image = vello::peniko::ImageData {
         data: vello::peniko::Blob::new(Arc::new(rgba.into_raw())),
         format: vello::peniko::ImageFormat::Rgba8,
@@ -603,24 +554,29 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
     };
     let image_brush = Arc::new(ImageBrush::new(vello_image));
 
-    // Parse optional clip shape from args
     let arg_list = steel_list_to_vec(&args)?;
-    let clip = if let Some(item) = arg_list.first() {
+    let clip_shape = if let Some(item) = arg_list.first() {
         Some(SchemeShapeKind::from_steelval(item)
-            .map_err(|e| format!("image: expected clip shape, got {:?} ({})", item, e))?.0)
+            .map_err(|e| format!("image: expected clip shape, got {:?} ({})", item, e))?)
     } else {
         None
     };
 
-    Ok(SchemeNode(Node::image(image_brush, clip)))
+    let mut node = Node::image(image_brush, clip_shape.as_ref().map(|s| s.kind.clone()));
+    if let Some(ref shape) = clip_shape {
+        if let Some(w) = shape.width {
+            node.style.layout.size.width = taffy::Dimension::length(w);
+        }
+        if let Some(h) = shape.height {
+            node.style.layout.size.height = taffy::Dimension::length(h);
+        }
+    }
+    Ok(SchemeNode(node))
 }
 
-/// Radial gradient: `(radial-gradient (stop 0 (hex "#fff")) (stop 100 (hex "#000")))`
-/// Optionally with center/radius overrides via number pairs.
 fn fn_make_radial_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     let list = steel_list_to_vec(&args)?;
 
-    // Shorthand: two colors
     if list.len() == 2
         && SchemeColor::from_steelval(&list[0]).is_ok()
         && SchemeColor::from_steelval(&list[1]).is_ok()
@@ -659,8 +615,6 @@ fn fn_make_radial_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     }))
 }
 
-/// Sweep gradient: `(sweep-gradient (angle 0) (angle 360) (stop 0 ...) (stop 100 ...))`
-/// First two `angle` args are start and end angles.
 fn fn_make_sweep_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     let list = steel_list_to_vec(&args)?;
 
@@ -693,11 +647,6 @@ fn fn_make_sweep_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     }))
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Helpers
-// ═══════════════════════════════════════════════════════════════
-
-/// Extract a symbol name from a SteelVal, with a nice error on wrong type.
 fn symbol_str(val: &SteelVal, fn_name: &str) -> Result<String, String> {
     match val {
         SteelVal::SymbolV(s) => Ok(s.to_string()),
@@ -706,13 +655,11 @@ fn symbol_str(val: &SteelVal, fn_name: &str) -> Result<String, String> {
     }
 }
 
-/// Convert a Steel list (or empty/void) to a Vec of SteelVal.
 fn steel_list_to_vec(val: &SteelVal) -> Result<Vec<SteelVal>, String> {
     match val {
         SteelVal::ListV(l) => Ok(l.iter().cloned().collect()),
         SteelVal::Void => Ok(Vec::new()),
         _ => {
-            // Try treating as a null/empty list
             if is_void_or_empty(val) {
                 Ok(Vec::new())
             } else {

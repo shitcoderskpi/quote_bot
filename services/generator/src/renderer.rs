@@ -1,5 +1,3 @@
-use std::num::NonZeroUsize;
-
 use vello::wgpu;
 use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
 
@@ -9,6 +7,7 @@ pub struct RenderContext {
     renderer: Renderer,
 }
 
+// Possibly can, and should be used per GPU
 impl RenderContext {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::default();
@@ -33,7 +32,7 @@ impl RenderContext {
             RendererOptions {
                 use_cpu: false,
                 antialiasing_support: AaSupport::area_only(),
-                num_init_threads: NonZeroUsize::new(1),
+                num_init_threads: None,
                 pipeline_cache: None,
             },
         )?;
@@ -73,7 +72,7 @@ impl RenderContext {
         self.renderer
             .render_to_texture(&self.device, &self.queue, scene, &view, &params)?;
 
-        let padded_bytes_per_row = (width * 4 + 255) & !255; // wgpu requires 256-byte alignment
+        let padded_bytes_per_row = (width * 4 + 255) & !255;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
             size: (padded_bytes_per_row * height) as u64,
