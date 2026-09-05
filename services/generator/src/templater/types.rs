@@ -273,6 +273,10 @@ impl Custom for SchemeRichText {}
 mod tests {
     use super::*;
 
+    fn epsilon() -> f32 {
+        0.0001
+    }
+
     #[test]
     fn dimension_length_to_dimension() {
         let d = SchemeDimension::Length(42.0);
@@ -482,7 +486,7 @@ mod tests {
     fn style_mod_opacity() {
         let mut style = Style::default();
         StyleMod::Opacity(0.42).apply(&mut style);
-        assert!((style.opacity - 0.42).abs() < 0.001);
+        assert!((style.opacity - 0.42).abs() < epsilon());
     }
 
     #[test]
@@ -611,5 +615,46 @@ mod tests {
             color: vello::peniko::Color::BLACK,
         });
         assert!(matches!(m, ShapeMod::Stroke(_)));
+    }
+
+    #[test]
+    fn scheme_number_from_int() {
+        let val = SteelVal::IntV(42);
+        let n = SchemeNumber::from_steelval(&val).unwrap();
+        assert_eq!(n.0, 42.0);
+    }
+
+    #[test]
+    fn scheme_number_from_float() {
+        let val = SteelVal::NumV(3.14);
+        let n = SchemeNumber::from_steelval(&val).unwrap();
+        assert!((n.0 - 3.14).abs() < epsilon() as f64);
+    }
+
+    #[test]
+    fn scheme_number_error() {
+        let val = SteelVal::StringV("nope".into());
+        assert!(SchemeNumber::from_steelval(&val).is_err());
+    }
+
+    #[test]
+    fn style_mod_inset_side_bottom() {
+        let mut style = Style::default();
+        StyleMod::InsetSide { side: Side::Bottom, dim: SchemeDimension::Length(20.0) }.apply(&mut style);
+        assert_eq!(style.layout.inset.bottom, LengthPercentageAuto::length(20.0));
+    }
+
+    #[test]
+    fn style_mod_inset_side_left() {
+        let mut style = Style::default();
+        StyleMod::InsetSide { side: Side::Left, dim: SchemeDimension::Length(30.0) }.apply(&mut style);
+        assert_eq!(style.layout.inset.left, LengthPercentageAuto::length(30.0));
+    }
+
+    #[test]
+    fn style_mod_inset_side_right() {
+        let mut style = Style::default();
+        StyleMod::InsetSide { side: Side::Right, dim: SchemeDimension::Length(15.0) }.apply(&mut style);
+        assert_eq!(style.layout.inset.right, LengthPercentageAuto::length(15.0));
     }
 }

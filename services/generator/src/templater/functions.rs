@@ -565,10 +565,10 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
     let mut node = Node::image(image_brush, clip_shape.as_ref().map(|s| s.kind.clone()));
     if let Some(ref shape) = clip_shape {
         if let Some(w) = shape.width {
-            node.style.layout.size.width = taffy::Dimension::length(w);
+            node.style.layout.size.width = Dimension::length(w);
         }
         if let Some(h) = shape.height {
-            node.style.layout.size.height = taffy::Dimension::length(h);
+            node.style.layout.size.height = Dimension::length(h);
         }
     }
     Ok(SchemeNode(node))
@@ -678,6 +678,11 @@ fn is_void_or_empty(val: &SteelVal) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use steel::rvals::IntoSteelVal;
+
+    fn epsilon() -> f32 {
+        0.0001
+    }
 
     #[test]
     fn hex_6_char_no_hash() {
@@ -774,13 +779,13 @@ mod tests {
     #[test]
     fn pct_converts() {
         let d = fn_pct(SchemeNumber(50.0));
-        assert!(matches!(d, SchemeDimension::Percent(v) if (v - 0.5).abs() < 0.001));
+        assert!(matches!(d, SchemeDimension::Percent(v) if (v - 0.5).abs() < epsilon()));
     }
 
     #[test]
     fn pct_100() {
         let d = fn_pct(SchemeNumber(100.0));
-        assert!(matches!(d, SchemeDimension::Percent(v) if (v - 1.0).abs() < 0.001));
+        assert!(matches!(d, SchemeDimension::Percent(v) if (v - 1.0).abs() < epsilon()));
     }
 
     #[test]
@@ -805,7 +810,7 @@ mod tests {
     #[test]
     fn stop_normalizes_offset() {
         let s = fn_stop(SchemeNumber(50.0), SchemeColor(vello::peniko::Color::BLACK));
-        assert!((s.offset - 0.5).abs() < 0.001);
+        assert!((s.offset - 0.5).abs() < epsilon());
     }
 
     #[test]
@@ -854,7 +859,7 @@ mod tests {
     #[test]
     fn opacity_fn() {
         let o = fn_opacity(SchemeNumber(0.5));
-        assert!(matches!(o, StyleMod::Opacity(v) if (v - 0.5).abs() < 0.001));
+        assert!(matches!(o, StyleMod::Opacity(v) if (v - 0.5).abs() < epsilon()));
     }
 
     #[test]
@@ -899,12 +904,626 @@ mod tests {
     #[test]
     fn line_height_fn() {
         let m = fn_line_height(SchemeNumber(1.5));
-        assert!(matches!(m, TextMod::LineHeight(v) if (v - 1.5).abs() < 0.001));
+        assert!(matches!(m, TextMod::LineHeight(v) if (v - 1.5).abs() < epsilon()));
     }
 
     #[test]
     fn svg_path_creates_shape_kind() {
         let s = fn_svg_path("M 0 0 L 10 10".to_string());
         assert!(matches!(s.kind, ShapeKind::Path { ref data } if data == "M 0 0 L 10 10"));
+    }
+
+    #[test]
+    fn rgb_creates_color() {
+        let c = fn_rgb(255, 128, 0);
+        assert_eq!(c.0, vello::peniko::Color::from_rgb8(255, 128, 0));
+    }
+
+    #[test]
+    fn rgba_creates_color() {
+        let c = fn_rgba(10, 20, 30, 128);
+        assert_eq!(c.0, vello::peniko::Color::from_rgba8(10, 20, 30, 128));
+    }
+
+    #[test]
+    fn fn_hex_valid() {
+        let c = fn_hex("#FF0000".to_string()).unwrap();
+        assert_eq!(c.0, vello::peniko::Color::from_rgba8(255, 0, 0, 255));
+    }
+
+    #[test]
+    fn fn_hex_invalid() {
+        let err = fn_hex("ZZZ".to_string());
+        assert!(err.is_err());
+    }
+
+    fn make_steel_list(items: Vec<SteelVal>) -> SteelVal {
+        SteelVal::ListV(items.into_iter().collect())
+    }
+
+    fn steel_stop(pct: f64, r: u8, g: u8, b: u8) -> SteelVal {
+        let stop = fn_stop(SchemeNumber(pct), SchemeColor(vello::peniko::Color::from_rgb8(r, g, b)));
+        stop.into_steelval().unwrap()
+    }
+
+    fn steel_angle(deg: f64) -> SteelVal {
+        let a = fn_angle(SchemeNumber(deg));
+        a.into_steelval().unwrap()
+    }
+
+    #[test]
+    fn linear_gradient_with_angle_and_stops() {
+        let args = make_steel_list(vec![
+            steel_angle(90.0),
+            steel_stop(0.0, 255, 0, 0),
+            steel_stop(100.0, 0, 0, 255),
+        ]);
+        let result = fn_make_linear_gradient(args).unwrap();
+        assert!(matches!(result.0, Paint::LinearGradient { .. }));
+    }
+
+    #[test]
+    fn linear_gradient_error_too_few_stops() {
+        let args = make_steel_list(vec![
+            steel_angle(45.0),
+            steel_stop(0.0, 255, 0, 0),
+        ]);
+        let result = fn_make_linear_gradient(args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn linear_gradient_error_bad_argument() {
+        let args = make_steel_list(vec![
+            SteelVal::StringV("bad".into()),
+        ]);
+        let result = fn_make_linear_gradient(args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn radial_gradient_with_stops() {
+        let args = make_steel_list(vec![
+            steel_stop(0.0, 255, 0, 0),
+            steel_stop(50.0, 0, 255, 0),
+            steel_stop(100.0, 0, 0, 255),
+        ]);
+        let result = fn_make_radial_gradient(args).unwrap();
+        assert!(matches!(result.0, Paint::RadialGradient { .. }));
+    }
+
+    #[test]
+    fn radial_gradient_error_too_few_stops() {
+        let args = make_steel_list(vec![
+            steel_stop(0.0, 255, 0, 0),
+        ]);
+        let result = fn_make_radial_gradient(args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn radial_gradient_error_bad_argument() {
+        let args = make_steel_list(vec![
+            SteelVal::IntV(42),
+        ]);
+        let result = fn_make_radial_gradient(args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sweep_gradient_with_angles_and_stops() {
+        let args = make_steel_list(vec![
+            steel_angle(0.0),
+            steel_angle(180.0),
+            steel_stop(0.0, 255, 0, 0),
+            steel_stop(100.0, 0, 0, 255),
+        ]);
+        let result = fn_make_sweep_gradient(args).unwrap();
+        assert!(matches!(result.0, Paint::SweepGradient { start_angle, end_angle, .. }
+            if start_angle == 0.0 && end_angle == 180.0));
+    }
+
+    #[test]
+    fn sweep_gradient_error_too_few_stops() {
+        let args = make_steel_list(vec![
+            steel_stop(0.0, 255, 0, 0),
+        ]);
+        assert!(fn_make_sweep_gradient(args).is_err());
+    }
+
+    #[test]
+    fn sweep_gradient_error_bad_argument() {
+        let args = make_steel_list(vec![
+            SteelVal::StringV("nope".into()),
+        ]);
+        assert!(fn_make_sweep_gradient(args).is_err());
+    }
+
+    fn steel_dim(px: f64) -> SteelVal {
+        SchemeDimension::Length(px as f32).into_steelval().unwrap()
+    }
+
+    #[test]
+    fn make_circle_no_args() {
+        let args = make_steel_list(vec![]);
+        let result = fn_make_circle(args).unwrap();
+        assert!(matches!(result.kind, ShapeKind::Circle));
+        assert!(result.width.is_none());
+    }
+
+    #[test]
+    fn make_circle_one_arg() {
+        let args = make_steel_list(vec![steel_dim(50.0)]);
+        let result = fn_make_circle(args).unwrap();
+        assert!(matches!(result.kind, ShapeKind::Circle));
+        assert_eq!(result.width, Some(50.0));
+        assert_eq!(result.height, Some(50.0));
+    }
+
+    #[test]
+    fn make_circle_two_args() {
+        let args = make_steel_list(vec![steel_dim(80.0), steel_dim(60.0)]);
+        let result = fn_make_circle(args).unwrap();
+        assert_eq!(result.width, Some(80.0));
+        assert_eq!(result.height, Some(60.0));
+    }
+
+    #[test]
+    fn make_circle_error_too_many_args() {
+        let args = make_steel_list(vec![steel_dim(1.0), steel_dim(2.0), steel_dim(3.0)]);
+        assert!(fn_make_circle(args).is_err());
+    }
+
+    #[test]
+    fn make_rect_no_args() {
+        let args = make_steel_list(vec![]);
+        let result = fn_make_rect(args).unwrap();
+        assert!(matches!(result.kind, ShapeKind::Rect { .. }));
+    }
+
+    #[test]
+    fn make_rect_one_arg() {
+        let args = make_steel_list(vec![steel_dim(100.0)]);
+        let result = fn_make_rect(args).unwrap();
+        assert_eq!(result.width, Some(100.0));
+    }
+
+    #[test]
+    fn make_rect_two_args() {
+        let args = make_steel_list(vec![steel_dim(100.0), steel_dim(50.0)]);
+        let result = fn_make_rect(args).unwrap();
+        assert_eq!(result.width, Some(100.0));
+        assert_eq!(result.height, Some(50.0));
+    }
+
+    #[test]
+    fn make_rect_error_too_many() {
+        let args = make_steel_list(vec![steel_dim(1.0), steel_dim(2.0), steel_dim(3.0)]);
+        assert!(fn_make_rect(args).is_err());
+    }
+
+    #[test]
+    fn make_rounded_rect_four_args() {
+        let args = make_steel_list(vec![
+            steel_dim(5.0), steel_dim(10.0), steel_dim(15.0), steel_dim(20.0),
+        ]);
+        let result = fn_make_rounded_rect(args).unwrap();
+        match result.kind {
+            ShapeKind::Rect { corners } => {
+                assert_eq!(corners.top_left, 5.0);
+                assert_eq!(corners.top_right, 10.0);
+                assert_eq!(corners.bottom_right, 15.0);
+                assert_eq!(corners.bottom_left, 20.0);
+            }
+            _ => panic!("Expected Rect"),
+        }
+    }
+
+    #[test]
+    fn make_rounded_rect_error_bad_count() {
+        let args = make_steel_list(vec![steel_dim(1.0), steel_dim(2.0)]);
+        assert!(fn_make_rounded_rect(args).is_err());
+    }
+
+    #[test]
+    fn direction_all_variants() {
+        for (sym, expected) in [
+            ("row", FlexDirection::Row),
+            ("column", FlexDirection::Column),
+            ("row-reverse", FlexDirection::RowReverse),
+            ("column-reverse", FlexDirection::ColumnReverse),
+        ] {
+            let val = SteelVal::SymbolV(sym.into());
+            let result = fn_direction(val).unwrap();
+            assert!(matches!(result, StyleMod::Direction(d) if d == expected));
+        }
+    }
+
+    #[test]
+    fn direction_error() {
+        let val = SteelVal::SymbolV("diagonal".into());
+        assert!(fn_direction(val).is_err());
+    }
+
+    #[test]
+    fn align_items_all_variants() {
+        for sym in ["start", "flex-start", "end", "flex-end", "center", "stretch", "baseline"] {
+            let val = SteelVal::SymbolV(sym.into());
+            assert!(fn_align_items(val).is_ok());
+        }
+    }
+
+    #[test]
+    fn align_items_error() {
+        let val = SteelVal::SymbolV("middle".into());
+        assert!(fn_align_items(val).is_err());
+    }
+
+    #[test]
+    fn justify_content_all_variants() {
+        for sym in ["start", "flex-start", "end", "flex-end", "center",
+                     "space-between", "space-around", "space-evenly"] {
+            let val = SteelVal::SymbolV(sym.into());
+            assert!(fn_justify_content(val).is_ok());
+        }
+    }
+
+    #[test]
+    fn justify_content_error() {
+        let val = SteelVal::SymbolV("spread".into());
+        assert!(fn_justify_content(val).is_err());
+    }
+
+    #[test]
+    fn display_flex() {
+        let val = SteelVal::SymbolV("flex".into());
+        assert!(matches!(fn_display(val).unwrap(), StyleMod::Display(Display::Flex)));
+    }
+
+    #[test]
+    fn display_none() {
+        let val = SteelVal::SymbolV("none".into());
+        assert!(matches!(fn_display(val).unwrap(), StyleMod::Display(Display::None)));
+    }
+
+    #[test]
+    fn display_error() {
+        let val = SteelVal::SymbolV("grid".into());
+        assert!(fn_display(val).is_err());
+    }
+
+    #[test]
+    fn position_absolute() {
+        let val = SteelVal::SymbolV("absolute".into());
+        assert!(matches!(fn_position(val).unwrap(), StyleMod::Position(Position::Absolute)));
+    }
+
+    #[test]
+    fn position_relative() {
+        let val = SteelVal::SymbolV("relative".into());
+        assert!(matches!(fn_position(val).unwrap(), StyleMod::Position(Position::Relative)));
+    }
+
+    #[test]
+    fn position_error() {
+        let val = SteelVal::SymbolV("fixed".into());
+        assert!(fn_position(val).is_err());
+    }
+
+    #[test]
+    fn make_padding_uniform() {
+        let args = make_steel_list(vec![steel_dim(10.0)]);
+        let result = fn_make_padding(args).unwrap();
+        assert!(matches!(result, StyleMod::PaddingUniform(_)));
+    }
+
+    #[test]
+    fn make_padding_trbl() {
+        let args = make_steel_list(vec![
+            steel_dim(1.0), steel_dim(2.0), steel_dim(3.0), steel_dim(4.0),
+        ]);
+        let result = fn_make_padding(args).unwrap();
+        assert!(matches!(result, StyleMod::PaddingTRBL(..)));
+    }
+
+    #[test]
+    fn make_padding_error_bad_count() {
+        let args = make_steel_list(vec![steel_dim(1.0), steel_dim(2.0)]);
+        assert!(fn_make_padding(args).is_err());
+    }
+
+    #[test]
+    fn padding_xy_fn() {
+        let result = fn_padding_xy(SchemeDimension::Length(10.0), SchemeDimension::Length(5.0));
+        assert!(matches!(result, StyleMod::PaddingXY(..)));
+    }
+
+    #[test]
+    fn margin_fn() {
+        let result = fn_margin(SchemeDimension::Length(8.0));
+        assert!(matches!(result, StyleMod::MarginUniform(_)));
+    }
+
+    #[test]
+    fn gap_fn() {
+        let result = fn_gap(SchemeDimension::Length(4.0));
+        assert!(matches!(result, StyleMod::GapUniform(_)));
+    }
+
+    #[test]
+    fn inset_fn() {
+        let result = fn_inset(
+            SchemeDimension::Length(1.0),
+            SchemeDimension::Length(2.0),
+            SchemeDimension::Length(3.0),
+            SchemeDimension::Length(4.0),
+        );
+        assert!(matches!(result, StyleMod::InsetAll(..)));
+    }
+
+    #[test]
+    fn max_min_width_height_fns() {
+        assert!(matches!(fn_max_width(SchemeDimension::Length(500.0)), StyleMod::MaxWidth(_)));
+        assert!(matches!(fn_max_height(SchemeDimension::Length(300.0)), StyleMod::MaxHeight(_)));
+        assert!(matches!(fn_min_width(SchemeDimension::Length(10.0)), StyleMod::MinWidth(_)));
+        assert!(matches!(fn_min_height(SchemeDimension::Length(5.0)), StyleMod::MinHeight(_)));
+    }
+
+    #[test]
+    fn link_color_fn() {
+        let m = fn_link_color(SchemeColor(vello::peniko::Color::WHITE));
+        assert!(matches!(m, TextMod::LinkColor(_)));
+    }
+
+    #[test]
+    fn code_family_fn() {
+        let m = fn_code_family("Fira Code".to_string());
+        assert!(matches!(m, TextMod::CodeFamily(f) if f == "Fira Code"));
+    }
+
+    #[test]
+    fn text_align_all_variants() {
+        for (sym, expected) in [
+            ("start", TextAlign::Start),
+            ("left", TextAlign::Start),
+            ("center", TextAlign::Center),
+            ("end", TextAlign::End),
+            ("right", TextAlign::End),
+            ("justify", TextAlign::Justify),
+        ] {
+            let val = SteelVal::SymbolV(sym.into());
+            let result = fn_text_align(val).unwrap();
+            assert!(matches!(result, TextMod::Align(a) if a == expected));
+        }
+    }
+
+    #[test]
+    fn text_align_error() {
+        let val = SteelVal::SymbolV("middle".into());
+        assert!(fn_text_align(val).is_err());
+    }
+
+    #[test]
+    fn make_style_empty() {
+        let mods = make_steel_list(vec![]);
+        let result = fn_make_style(mods).unwrap();
+        assert_eq!(result.0.opacity, 1.0);
+    }
+
+    #[test]
+    fn make_style_with_mods() {
+        let opacity_mod = StyleMod::Opacity(0.5);
+        let rotate_mod = StyleMod::Rotate(90.0);
+        let mods = make_steel_list(vec![
+            opacity_mod.into_steelval().unwrap(),
+            rotate_mod.into_steelval().unwrap(),
+        ]);
+        let result = fn_make_style(mods).unwrap();
+        assert!((result.0.opacity - 0.5).abs() < epsilon());
+        assert_eq!(result.0.rotate_deg, 90.0);
+    }
+
+    #[test]
+    fn make_node_empty() {
+        let args = make_steel_list(vec![]);
+        let result = fn_make_node(args).unwrap();
+        assert!(matches!(result.0.content, Content::Group(ref c) if c.is_empty()));
+    }
+
+    #[test]
+    fn make_node_with_style_and_child() {
+        let style = SchemeStyle(Style::default()).into_steelval().unwrap();
+        let child = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let args = make_steel_list(vec![style, child]);
+        let result = fn_make_node(args).unwrap();
+        assert!(matches!(result.0.content, Content::Shape { .. }));
+    }
+
+    #[test]
+    fn make_node_with_multiple_children() {
+        let c1 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let c2 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let args = make_steel_list(vec![c1, c2]);
+        let result = fn_make_node(args).unwrap();
+        assert!(matches!(result.0.content, Content::Group(ref c) if c.len() == 2));
+    }
+
+    #[test]
+    fn make_node_skips_void() {
+        let c1 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let args = make_steel_list(vec![SteelVal::Void, c1]);
+        let result = fn_make_node(args).unwrap();
+        assert!(matches!(result.0.content, Content::Shape { .. }));
+    }
+
+    #[test]
+    fn make_node_error_bad_arg() {
+        let args = make_steel_list(vec![SteelVal::IntV(42)]);
+        assert!(fn_make_node(args).is_err());
+    }
+
+    #[test]
+    fn make_text_basic() {
+        let content = SteelVal::StringV("hello".into());
+        let mods = make_steel_list(vec![]);
+        let result = fn_make_text(content, mods, &None, &None).unwrap();
+        assert_eq!(result.0.text, "hello");
+    }
+
+    #[test]
+    fn make_text_error_not_string() {
+        let content = SteelVal::IntV(42);
+        let mods = make_steel_list(vec![]);
+        assert!(fn_make_text(content, mods, &None, &None).is_err());
+    }
+
+    #[test]
+    fn make_text_with_mods() {
+        let content = SteelVal::StringV("styled".into());
+        let bold = TextMod::Weight(parley::FontWeight::BOLD);
+        let mods = make_steel_list(vec![bold.into_steelval().unwrap()]);
+        let result = fn_make_text(content, mods, &None, &None).unwrap();
+        assert_eq!(result.0.default_weight, parley::FontWeight::BOLD);
+    }
+
+    #[test]
+    fn make_text_with_link_color_and_code_family() {
+        let content = SteelVal::StringV("links".into());
+        let lc = TextMod::LinkColor(vello::peniko::Color::WHITE);
+        let cf = TextMod::CodeFamily("Fira Code".into());
+        let mods = make_steel_list(vec![
+            lc.into_steelval().unwrap(),
+            cf.into_steelval().unwrap(),
+        ]);
+        let result = fn_make_text(content, mods, &None, &None).unwrap();
+        assert_eq!(result.0.text, "links");
+    }
+
+    #[test]
+    fn make_text_with_entities() {
+        let text = "Hello bold world";
+        let content = SteelVal::StringV(text.into());
+        let mods = make_steel_list(vec![]);
+        let entities = vec![
+            serde_json::json!({"type": "bold", "offset": 6, "length": 4}),
+            serde_json::json!({"type": "italic", "offset": 0, "length": 5}),
+            serde_json::json!({"type": "underline", "offset": 0, "length": 5}),
+            serde_json::json!({"type": "strikethrough", "offset": 0, "length": 5}),
+            serde_json::json!({"type": "code", "offset": 0, "length": 5}),
+            serde_json::json!({"type": "text_link", "offset": 0, "length": 5}),
+            serde_json::json!({"type": "bot_command", "offset": 0, "length": 5}),
+            serde_json::json!({"type": "unknown_type", "offset": 0, "length": 5}),
+        ];
+        let result = fn_make_text(
+            content, mods,
+            &Some(text.to_string()),
+            &Some(entities),
+        ).unwrap();
+        assert!(!result.0.spans.is_empty());
+    }
+
+    #[test]
+    fn make_shape_with_fill() {
+        let kind = SchemeShapeKind::new(ShapeKind::Circle);
+        let fill_mod = ShapeMod::Fill(Paint::solid(vello::peniko::Color::BLACK));
+        let mods = make_steel_list(vec![fill_mod.into_steelval().unwrap()]);
+        let result = fn_make_shape(kind, mods).unwrap();
+        assert!(matches!(result.0.content, Content::Shape { ref fill, .. } if fill.is_some()));
+    }
+
+    #[test]
+    fn make_shape_with_stroke() {
+        let kind = SchemeShapeKind::new(ShapeKind::Circle);
+        let stroke_mod = ShapeMod::Stroke(Stroke {
+            width: 3.0,
+            color: vello::peniko::Color::WHITE,
+        });
+        let mods = make_steel_list(vec![stroke_mod.into_steelval().unwrap()]);
+        let result = fn_make_shape(kind, mods).unwrap();
+        assert!(matches!(result.0.content, Content::Shape { ref stroke, .. } if stroke.is_some()));
+    }
+
+    #[test]
+    fn make_image_valid() {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
+        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        let b64 = BASE64_STANDARD.encode(buf.into_inner());
+
+        let data = SteelVal::StringV(b64.into());
+        let args = make_steel_list(vec![]);
+        let result = fn_make_image(data, args).unwrap();
+        assert!(matches!(result.0.content, Content::Image { .. }));
+    }
+
+    #[test]
+    fn make_image_with_clip() {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
+        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        let b64 = BASE64_STANDARD.encode(buf.into_inner());
+
+        let clip = SchemeShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
+        let data = SteelVal::StringV(b64.into());
+        let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
+        let result = fn_make_image(data, args).unwrap();
+        assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));
+    }
+
+    #[test]
+    fn make_image_error_not_string() {
+        let data = SteelVal::IntV(42);
+        let args = make_steel_list(vec![]);
+        assert!(fn_make_image(data, args).is_err());
+    }
+
+    #[test]
+    fn make_image_error_invalid_base64() {
+        let data = SteelVal::StringV("not-base64!!!".into());
+        let args = make_steel_list(vec![]);
+        assert!(fn_make_image(data, args).is_err());
+    }
+
+    #[test]
+    fn symbol_str_from_symbol() {
+        let val = SteelVal::SymbolV("test".into());
+        assert_eq!(symbol_str(&val, "fn").unwrap(), "test");
+    }
+
+    #[test]
+    fn symbol_str_from_string() {
+        let val = SteelVal::StringV("test".into());
+        assert_eq!(symbol_str(&val, "fn").unwrap(), "test");
+    }
+
+    #[test]
+    fn symbol_str_error() {
+        let val = SteelVal::IntV(42);
+        assert!(symbol_str(&val, "fn").is_err());
+    }
+
+    #[test]
+    fn steel_list_to_vec_from_list() {
+        let list = make_steel_list(vec![SteelVal::IntV(1), SteelVal::IntV(2)]);
+        let result = steel_list_to_vec(&list).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn steel_list_to_vec_from_void() {
+        let result = steel_list_to_vec(&SteelVal::Void).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn steel_list_to_vec_error() {
+        let val = SteelVal::IntV(42);
+        assert!(steel_list_to_vec(&val).is_err());
+    }
+
+    #[test]
+    fn steel_list_to_vec_from_false() {
+        let result = steel_list_to_vec(&SteelVal::BoolV(false)).unwrap();
+        assert!(result.is_empty());
     }
 }

@@ -115,6 +115,10 @@ mod tests {
     use super::*;
     use crate::primitives::node::Content;
     use serde_json::json;
+    
+    fn epsilon() -> f32 {
+        0.0001
+    }
 
     #[test]
     fn json_null() {
@@ -281,7 +285,7 @@ mod tests {
             None,
         ).unwrap();
         match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "FB"), // takes only first 2
+            Content::Text(rich) => assert_eq!(rich.text, "FB"),
             other => panic!("Expected Text, got {:?}", other),
         }
     }
@@ -350,7 +354,6 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                // Links should have underline and a color
                 assert_eq!(rich.spans[0].underline, Some(true));
                 assert!(rich.spans[0].color.is_some());
             }
@@ -386,8 +389,8 @@ mod tests {
             None,
             None,
         ).unwrap();
-        assert!((node.style.opacity - 0.8).abs() < 0.01);
-        assert!((node.style.rotate_deg - 45.0).abs() < 0.01);
+        assert!((node.style.opacity - 0.8).abs() < epsilon());
+        assert!((node.style.rotate_deg - 45.0).abs() < epsilon() as f64);
     }
 
     #[test]
@@ -455,4 +458,151 @@ mod tests {
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { .. }));
     }
+
+    #[test]
+    fn render_avatar_colors_all_grad_ids() {
+        let expected_tops = [
+            (0, "#FF516A"),
+            (1, "#FFA85C"),
+            (2, "#8C79F2"),
+            (3, "#51BB3F"),
+            (4, "#34C6CD"),
+            (5, "#549CFF"),
+            (6, "#F2799B"),
+        ];
+        for (grad_id, expected_top) in expected_tops {
+            let mut t = Templater::new();
+            let node = t.render_template(
+                r#"(node (text (get-payload 'avatar_color_top "")))"#,
+                &format!(r#"{{"username": "X", "grad_id": {}}}"#, grad_id),
+                None,
+                None,
+            ).unwrap();
+            match &node.content {
+                Content::Text(rich) => assert_eq!(rich.text, expected_top, "grad_id={}", grad_id),
+                other => panic!("Expected Text for grad_id={}, got {:?}", grad_id, other),
+            }
+        }
+    }
+
+    #[test]
+    fn render_avatar_colors_bottom() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'avatar_color_bottom "")))"#,
+            r#"{"username": "X", "grad_id": 5}"#,
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "#3CB9FE"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_underline() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "hello"}"#,
+            Some("hello".to_string()),
+            Some(vec![json!({"type": "underline", "offset": 0, "length": 5})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert_eq!(rich.spans[0].underline, Some(true));
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_strikethrough() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "hello"}"#,
+            Some("hello".to_string()),
+            Some(vec![json!({"type": "strikethrough", "offset": 0, "length": 5})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert_eq!(rich.spans[0].strikethrough, Some(true));
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_code() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "hello"}"#,
+            Some("hello".to_string()),
+            Some(vec![json!({"type": "code", "offset": 0, "length": 5})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert!(rich.spans[0].font_family.is_some());
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_bot_command() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "/start"}"#,
+            Some("/start".to_string()),
+            Some(vec![json!({"type": "bot_command", "offset": 0, "length": 6})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].underline.is_none());
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_url() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "http://a.com"}"#,
+            Some("http://a.com".to_string()),
+            Some(vec![json!({"type": "url", "offset": 0, "length": 12})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert!(rich.spans[0].color.is_some());
+                assert_eq!(rich.spans[0].underline, Some(true));
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_mention() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "@user"}"#,
+            Some("@user".to_string()),
+            Some(vec![json!({"type": "mention", "offset": 0, "length": 5})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert!(rich.spans[0].color.is_some());
+                assert_eq!(rich.spans[0].underline, Some(true));
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
 }
+

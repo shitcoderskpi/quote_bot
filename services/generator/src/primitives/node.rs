@@ -84,6 +84,7 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vello::peniko::ImageData;
     use crate::primitives::paint::Paint;
     use crate::primitives::shape::{Corners, ShapeKind};
     use crate::primitives::text::RichText;
@@ -145,29 +146,28 @@ mod tests {
     #[test]
     fn image_constructor() {
         let pixels = vec![255u8; 4];
-        let image_data = vello::peniko::ImageData {
-            data: vello::peniko::Blob::new(std::sync::Arc::new(pixels)),
+        let image_data = new_image_data(pixels);
+        let brush = Arc::new(ImageBrush::new(image_data));
+        let node = Node::image(brush, Some(ShapeKind::Circle));
+        assert!(matches!(node.content, Content::Image { ref clip, .. } if clip.is_some()));
+    }
+
+    fn new_image_data(pixels: Vec<u8>) -> ImageData {
+        let image_data = ImageData {
+            data: vello::peniko::Blob::new(Arc::new(pixels)),
             format: vello::peniko::ImageFormat::Rgba8,
             alpha_type: vello::peniko::ImageAlphaType::Alpha,
             width: 1,
             height: 1,
         };
-        let brush = std::sync::Arc::new(ImageBrush::new(image_data));
-        let node = Node::image(brush, Some(ShapeKind::Circle));
-        assert!(matches!(node.content, Content::Image { ref clip, .. } if clip.is_some()));
+        image_data
     }
 
     #[test]
     fn image_constructor_no_clip() {
         let pixels = vec![0u8; 4];
-        let image_data = vello::peniko::ImageData {
-            data: vello::peniko::Blob::new(std::sync::Arc::new(pixels)),
-            format: vello::peniko::ImageFormat::Rgba8,
-            alpha_type: vello::peniko::ImageAlphaType::Alpha,
-            width: 1,
-            height: 1,
-        };
-        let brush = std::sync::Arc::new(ImageBrush::new(image_data));
+        let image_data = new_image_data(pixels);
+        let brush = Arc::new(ImageBrush::new(image_data));
         let node = Node::image(brush, None);
         assert!(matches!(node.content, Content::Image { ref clip, .. } if clip.is_none()));
     }
@@ -202,5 +202,25 @@ mod tests {
         let c = Content::Group(vec![]);
         let dbg = format!("{:?}", c);
         assert!(dbg.contains("Group"));
+    }
+
+    #[test]
+    fn content_debug_image() {
+        let pixels = vec![0u8; 4];
+        let image_data = new_image_data(pixels);
+        let brush = Arc::new(ImageBrush::new(image_data));
+        let c = Content::Image { image: brush, clip: Some(ShapeKind::Circle) };
+        let dbg = format!("{:?}", c);
+        assert!(dbg.contains("Image"));
+        assert!(dbg.contains("clip"));
+    }
+
+    #[test]
+    fn content_debug_text() {
+        let rt = RichText::plain("debug me");
+        let c = Content::Text(rt);
+        let dbg = format!("{:?}", c);
+        assert!(dbg.contains("Text"));
+        assert!(dbg.contains("debug me"));
     }
 }

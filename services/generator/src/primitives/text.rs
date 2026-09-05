@@ -289,4 +289,102 @@ mod tests {
         assert!(layout.width() > 0.0);
         assert!(layout.height() > 0.0);
     }
+
+    #[test]
+    fn layout_with_default_italic() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut rt = RichText::plain("italic text");
+        rt.default_italic = true;
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0);
+    }
+
+    #[test]
+    fn layout_with_default_underline() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut rt = RichText::plain("underlined");
+        rt.default_underline = true;
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0);
+    }
+
+    #[test]
+    fn layout_with_default_strikethrough() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut rt = RichText::plain("struck");
+        rt.default_strikethrough = true;
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0);
+    }
+
+    #[test]
+    fn layout_with_default_line_height() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut rt = RichText::plain("line height");
+        rt.default_line_height = Some(2.0);
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.height() > 0.0);
+    }
+
+    #[test]
+    fn layout_with_all_span_properties() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut span = Span::new(0..5);
+        span.font_family = Some("serif".into());
+        span.font_size = Some(20.0);
+        span.weight = Some(FontWeight::BOLD);
+        span.italic = Some(true);
+        span.underline = Some(true);
+        span.strikethrough = Some(true);
+        span.color = Some(peniko::Color::WHITE);
+        span.line_height = Some(1.5);
+        let rt = RichText::plain("Hello World").with_span(span);
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0);
+    }
+
+    #[test]
+    fn layout_with_italic_false_span() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut span = Span::new(0..5);
+        span.italic = Some(false);
+        let rt = RichText::plain("Hello World").with_span(span);
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0);
+    }
+
+    #[test]
+    fn layout_no_max_width() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let rt = RichText::plain("unconstrained");
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, None, viewport);
+        assert!(layout.width() > 0.0);
+    }
+
+    #[test]
+    fn layout_all_alignments() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        for align in [TextAlign::Start, TextAlign::Center, TextAlign::End, TextAlign::Justify] {
+            let mut rt = RichText::plain("aligned");
+            rt.align = align;
+            let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+            assert!(layout.width() > 0.0);
+        }
+    }
 }

@@ -35,7 +35,8 @@ impl Renderer {
         
         self.taffy.compute_layout_with_measure(
             root_id,
-            Size { width: AvailableSpace::Definite(1000.0), height: AvailableSpace::Definite(1000.0) },
+            Size { width: AvailableSpace::Definite(viewport.width as f32),
+                height: AvailableSpace::Definite(viewport.height as f32) },
             |known_dims, avail_space, _id, ctx, _tree| {
                 if let Some(Content::Text(rich)) = ctx {
                     let max_width = known_dims.width.map(|w| w as f64).or_else(|| {
@@ -222,10 +223,13 @@ mod tests {
     use crate::primitives::text::RichText;
     use crate::primitives::Viewport;
     use std::sync::Arc;
-    use vello::kurbo::Affine;
 
     fn vp() -> Viewport {
         Viewport { width: 1.0, height: 1.0 }
+    }
+
+    fn epsilon() -> f64 {
+        0.0001
     }
 
     fn make_image_brush(w: u32, h: u32) -> ImageBrush {
@@ -241,16 +245,9 @@ mod tests {
 
     fn shaped_node(w: f32, h: f32) -> Node {
         let mut style = Style::default();
-        style.layout.size.width = taffy::Dimension::length(w);
-        style.layout.size.height = taffy::Dimension::length(h);
-        Node {
-            style,
-            content: Content::Shape {
-                kind: ShapeKind::Rect { corners: Corners::zero() },
-                fill: Some(Paint::solid(vello::peniko::Color::BLACK)),
-                stroke: None,
-            },
-        }
+        style.layout.size.width = Dimension::length(w);
+        style.layout.size.height = Dimension::length(h);
+        make_node(style)
     }
 
     #[test]
@@ -258,9 +255,9 @@ mod tests {
         let img = make_image_brush(100, 100);
         let t = cover_fit_transform(&img, 100.0, 100.0);
         let c = t.as_coeffs();
-        assert!((c[0] - 1.0).abs() < 0.001, "scale_x = {}", c[0]);
-        assert!((c[4]).abs() < 0.001, "dx = {}", c[4]);
-        assert!((c[5]).abs() < 0.001, "dy = {}", c[5]);
+        assert!((c[0] - 1.0).abs() < epsilon(), "scale_x = {}", c[0]);
+        assert!(c[4].abs() < epsilon(), "dx = {}", c[4]);
+        assert!(c[5].abs() < epsilon(), "dy = {}", c[5]);
     }
 
     #[test]
@@ -268,9 +265,9 @@ mod tests {
         let img = make_image_brush(200, 100);
         let t = cover_fit_transform(&img, 100.0, 100.0);
         let c = t.as_coeffs();
-        assert!((c[0] - 1.0).abs() < 0.001, "scale = {}", c[0]);
-        assert!((c[4] - (-50.0)).abs() < 0.001, "dx = {}", c[4]);
-        assert!((c[5]).abs() < 0.001, "dy = {}", c[5]);
+        assert!((c[0] - 1.0).abs() < epsilon(), "scale = {}", c[0]);
+        assert!((c[4] - (-50.0)).abs() < epsilon(), "dx = {}", c[4]);
+        assert!(c[5].abs() < epsilon(), "dy = {}", c[5]);
     }
 
     #[test]
@@ -278,9 +275,9 @@ mod tests {
         let img = make_image_brush(100, 200);
         let t = cover_fit_transform(&img, 100.0, 100.0);
         let c = t.as_coeffs();
-        assert!((c[0] - 1.0).abs() < 0.001, "scale = {}", c[0]);
-        assert!((c[4]).abs() < 0.001, "dx = {}", c[4]);
-        assert!((c[5] - (-50.0)).abs() < 0.001, "dy = {}", c[5]);
+        assert!((c[0] - 1.0).abs() < epsilon(), "scale = {}", c[0]);
+        assert!(c[4].abs() < epsilon(), "dx = {}", c[4]);
+        assert!((c[5] + 50.0).abs() < epsilon(), "dy = {}", c[5]);
     }
 
     #[test]
@@ -288,9 +285,9 @@ mod tests {
         let img = make_image_brush(50, 50);
         let t = cover_fit_transform(&img, 100.0, 100.0);
         let c = t.as_coeffs();
-        assert!((c[0] - 2.0).abs() < 0.001, "scale = {}", c[0]);
-        assert!((c[4]).abs() < 0.001, "dx = {}", c[4]);
-        assert!((c[5]).abs() < 0.001, "dy = {}", c[5]);
+        assert!((c[0] - 2.0).abs() < epsilon(), "scale = {}", c[0]);
+        assert!(c[4].abs() < epsilon(), "dx = {}", c[4]);
+        assert!(c[5].abs() < epsilon(), "dy = {}", c[5]);
     }
 
     #[test]
@@ -298,7 +295,7 @@ mod tests {
         let img = make_image_brush(0, 0);
         let t = cover_fit_transform(&img, 100.0, 100.0);
         let c = t.as_coeffs();
-        assert!((c[0] - 100.0).abs() < 0.001, "scale = {}", c[0]);
+        assert!((c[0] - 100.0).abs() < epsilon(), "scale = {}", c[0]);
     }
 
     #[test]
@@ -306,14 +303,14 @@ mod tests {
         let node = shaped_node(120.0, 80.0);
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
-        assert!((w - 120.0).abs() < 0.1, "w = {}", w);
-        assert!((h - 80.0).abs() < 0.1, "h = {}", h);
+        assert!((w - 120.0).abs() < epsilon(), "w = {}", w);
+        assert!((h - 80.0).abs() < epsilon(), "h = {}", h);
     }
 
     #[test]
     fn compute_layout_group_column() {
         let mut group_style = Style::default();
-        group_style.layout.flex_direction = taffy::FlexDirection::Column;
+        group_style.layout.flex_direction = FlexDirection::Column;
 
         let group = Node {
             style: group_style,
@@ -324,14 +321,14 @@ mod tests {
         };
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&group, vp(), 16.0);
-        assert!((w - 100.0).abs() < 1.0, "w = {}", w);
-        assert!((h - 100.0).abs() < 1.0, "h = {}", h);
+        assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
+        assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
 
     #[test]
     fn compute_layout_group_row() {
         let mut group_style = Style::default();
-        group_style.layout.flex_direction = taffy::FlexDirection::Row;
+        group_style.layout.flex_direction = FlexDirection::Row;
 
         let group = Node {
             style: group_style,
@@ -342,8 +339,8 @@ mod tests {
         };
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&group, vp(), 16.0);
-        assert!((w - 100.0).abs() < 1.0, "w = {}", w);
-        assert!((h - 100.0).abs() < 1.0, "h = {}", h);
+        assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
+        assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
 
     #[test]
@@ -358,20 +355,20 @@ mod tests {
         };
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&outer, vp(), 16.0);
-        assert!((w - 60.0).abs() < 1.0, "w = {}", w);
-        assert!((h - 40.0).abs() < 1.0, "h = {}", h);
+        assert!((w - 60.0).abs() < epsilon(), "w = {}", w);
+        assert!((h - 40.0).abs() < epsilon(), "h = {}", h);
     }
 
     #[test]
     fn compute_layout_with_padding() {
         let mut style = Style::default();
-        style.layout.size.width = taffy::Dimension::length(100.0);
-        style.layout.size.height = taffy::Dimension::length(100.0);
-        style.layout.padding = taffy::Rect {
-            top: taffy::LengthPercentage::length(10.0),
-            right: taffy::LengthPercentage::length(10.0),
-            bottom: taffy::LengthPercentage::length(10.0),
-            left: taffy::LengthPercentage::length(10.0),
+        style.layout.size.width = Dimension::length(100.0);
+        style.layout.size.height = Dimension::length(100.0);
+        style.layout.padding = Rect {
+            top: LengthPercentage::length(10.0),
+            right: LengthPercentage::length(10.0),
+            bottom: LengthPercentage::length(10.0),
+            left: LengthPercentage::length(10.0),
         };
         let node = Node {
             style,
@@ -379,8 +376,8 @@ mod tests {
         };
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
-        assert!((w - 100.0).abs() < 0.1, "w = {}", w);
-        assert!((h - 100.0).abs() < 0.1, "h = {}", h);
+        assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
+        assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
 
     #[test]
@@ -399,7 +396,7 @@ mod tests {
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
 
-        let mut scene = vello::Scene::new();
+        let mut scene = Scene::new();
         let root_box = KRect::new(0.0, 0.0, w, h);
         renderer.render(&mut scene, &node, root_box, vp());
     }
@@ -407,7 +404,7 @@ mod tests {
     #[test]
     fn render_group_with_mixed_content() {
         let mut style = Style::default();
-        style.layout.flex_direction = taffy::FlexDirection::Column;
+        style.layout.flex_direction = FlexDirection::Column;
         let group = Node {
             style,
             content: Content::Group(vec![
@@ -418,8 +415,96 @@ mod tests {
         };
         let mut renderer = Renderer::new();
         let (w, h) = renderer.compute_layout(&group, vp(), 16.0);
-        let mut scene = vello::Scene::new();
+        let mut scene = Scene::new();
         let root_box = KRect::new(0.0, 0.0, w, h);
         renderer.render(&mut scene, &group, root_box, vp());
+    }
+
+    #[test]
+    fn render_shape_with_stroke() {
+        let mut style = Style::default();
+        style.layout.size.width = Dimension::length(80.0);
+        style.layout.size.height = Dimension::length(40.0);
+        let node = Node {
+            style,
+            content: Content::Shape {
+                kind: ShapeKind::Rect { corners: Corners::zero() },
+                fill: Some(Paint::solid(vello::peniko::Color::BLACK)),
+                stroke: Some(crate::primitives::paint::Stroke {
+                    width: 2.0,
+                    color: vello::peniko::Color::WHITE,
+                }),
+            },
+        };
+        let mut renderer = Renderer::new();
+        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let mut scene = Scene::new();
+        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+    }
+
+    #[test]
+    fn render_image_node() {
+        let brush = Arc::new(make_image_brush(50, 30));
+        let mut style = Style::default();
+        style.layout.size.width = Dimension::length(50.0);
+        style.layout.size.height = Dimension::length(30.0);
+        let node = Node {
+            style,
+            content: Content::Image { image: brush, clip: Some(ShapeKind::Circle) },
+        };
+        let mut renderer = Renderer::new();
+        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let mut scene = Scene::new();
+        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+    }
+
+    #[test]
+    fn render_node_with_opacity() {
+        let mut style = Style::default();
+        style.layout.size.width = Dimension::length(60.0);
+        style.layout.size.height = Dimension::length(60.0);
+        style.opacity = 0.5;
+        let node = make_node(style);
+        let mut renderer = Renderer::new();
+        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let mut scene = Scene::new();
+        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+    }
+
+    fn make_node(style: Style) -> Node {
+        Node {
+            style,
+            content: Content::Shape {
+                kind: ShapeKind::Rect { corners: Corners::zero() },
+                fill: Some(Paint::solid(vello::peniko::Color::BLACK)),
+                stroke: None,
+            },
+        }
+    }
+
+    #[test]
+    fn render_node_with_clip() {
+        let mut style = Style::default();
+        style.layout.size.width = Dimension::length(80.0);
+        style.layout.size.height = Dimension::length(80.0);
+        style.clip = Some(ShapeKind::Circle);
+        let node = make_node(style);
+        let mut renderer = Renderer::new();
+        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let mut scene = Scene::new();
+        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+    }
+
+    #[test]
+    fn compute_layout_image_node_uses_intrinsic_size() {
+        let brush = Arc::new(make_image_brush(120, 80));
+        let node = Node {
+            style: Style::default(),
+            content: Content::Image { image: brush, clip: None },
+        };
+        let mut renderer = Renderer::new();
+        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        assert!((w - 120.0).abs() < epsilon(), "w = {}", w);
+        assert!((h - 80.0).abs() < epsilon(), "h = {}", h);
     }
 }
