@@ -23,14 +23,16 @@ Then fill <ins>everything blank</ins>.
 **P.s:** *Ask if you don't know...*
 
 ## Generator Service
-The generator is a Rust service (`services/generator`) that receives jobs from a Redis queue, renders quote images via GPU (wgpu + vello), and pushes results back.
+The generator is a Rust service (`services/generator`) that receives jobs from a Redis queue, renders quote images via GPU, and pushes results back.
 
 ### Template format
-Visual appearance is controlled by Minijinja templates in `services/generator/templates/`:
+Visual appearance is controlled by template files in `services/generator/templates/`:
 
 | File        | Theme           |
 |-------------|-----------------|
-| `light.tem` | Light (default) |
-| `dark.tem`  | Dark            |
+| `light.scm` | Light (default) |
+| `dark.scm`  | Dark            |
 
-Each template is a series of COFFIN segments (SVG background + text layers) with Jinja expressions for dynamic values such as dimensions, content, username, and user role colors. The format is documented in [`services/generator/FORMAT.md`](services/generator/FORMAT.md).
+Templates use a Steel scheme to build a node layout tree with text, shapes, and gradients.
+The script receives a `payload` variable with the quote details.
+The full DSL reference is documented in [`services/generator/DSL.md`](services/generator/DSL.md).
