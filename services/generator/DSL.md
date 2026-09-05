@@ -21,12 +21,12 @@ Steel Scheme (`.scm`) template files build a **Node tree** using registered Rust
 
 ## Units / Dimensions
 
-| Call      | Description                           |
-|-----------|---------------------------------------|
-| `(px N)`  | Pixels (absolute)                     |
-| `(pt N)`  | Points → pixels (×1.333 at 96 dpi)    |
-| `(pct N)` | Percentage (0–100, mapped to 0.0–1.0) |
-| `(auto)`  | Auto sizing                           |
+| Call      | Description |
+|-----------|-------------|
+| `(px N)`  | Pixels      |
+| `(pt N)`  | Points      |
+| `(pct N)` | Percentage  |
+| `(auto)`  | Auto sizing |
 
 ---
 
@@ -42,20 +42,20 @@ Steel Scheme (`.scm`) template files build a **Node tree** using registered Rust
 
 ## Paints (fill / stroke values)
 
-| Call                                    | Description                                                                                                                          |
-|-----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `(solid COLOR)`                         | Solid fill. `(solid (hex "#FFF"))`                                                                                                   |
-| `(linear-gradient COLOR COLOR)`         | Simple top→bottom gradient. `(linear-gradient (hex "#fff") (hex "#000"))`                                                            |
-| `(linear-gradient ANGLE STOP STOP ...)` | Rich gradient with custom angle and stops                                                                                            |
-| `(radial-gradient STOP STOP ...)`       | Radial gradient from center to edge. `(radial-gradient (stop 0 (hex "#fff")) (stop 100 (hex "#000")))`                               |
-| `(sweep-gradient ANGLE ANGLE STOP ...)` | Sweep gradient from start angle to end angle. `(sweep-gradient (angle 0) (angle 360) (stop 0 (hex "#fff")) (stop 100 (hex "#000")))` |
+| Call                                    | Example                                                                                | Description                                   |
+|-----------------------------------------|----------------------------------------------------------------------------------------|-----------------------------------------------|
+| `(solid COLOR)`                         | `(solid (hex "#FFF"))`                                                                 | Solid fill.                                   |
+| `(linear-gradient COLOR COLOR)`         | `(linear-gradient (hex "#fff") (hex "#000"))`                                          | Simple top to bottom gradient.                |
+| `(linear-gradient ANGLE STOP STOP ...)` | `(linear-gradient (angle 0) (stop 0 (hex "#fff")) (stop 100 (hex "#000")))`            | Rich gradient with custom angle and stops     |
+| `(radial-gradient STOP STOP ...)`       | `(radial-gradient (stop 0 (hex "#fff")) (stop 100 (hex "#000")))`                      | Radial gradient from center to edge.          |
+| `(sweep-gradient ANGLE ANGLE STOP ...)` | `(sweep-gradient (angle 0) (angle 360) (stop 0 (hex "#fff")) (stop 100 (hex "#000")))` | Sweep gradient from start angle to end angle. |
 
 ### Rich gradient helpers
 
-| Call               | Description                                                 |
-|--------------------|-------------------------------------------------------------|
-| `(angle DEG)`      | Gradient angle in degrees. `(angle 45)`                     |
-| `(stop PCT COLOR)` | Gradient color stop. `(stop 0 (hex "#f00"))` — pct is 0–100 |
+| Call               | Description                |
+|--------------------|----------------------------|
+| `(angle DEG)`      | Gradient angle in degrees. |
+| `(stop PCT COLOR)` | Gradient color stop.       |
 
 **Example:**
 ```scheme
@@ -69,13 +69,13 @@ Steel Scheme (`.scm`) template files build a **Node tree** using registered Rust
 
 ## Shapes
 
-| Call                           | Description                                                            |
-|--------------------------------|------------------------------------------------------------------------|
-| `(circle)`                     | Circle (inscribed in the node's box)                                   |
-| `(rect)`                       | Rectangle with sharp corners                                           |
-| `(rounded-rect DIM)`           | Rectangle with uniform corner radius. `(rounded-rect (px 16))`         |
-| `(rounded-rect TL TR BR BL)`   | Per-corner radii. `(rounded-rect (px 16) (px 16) (px 16) (px 0))`      |
-| `(svg-path STR)`               | Arbitrary SVG path data. `(svg-path "M 10 0 Q 10 18 0 18 L 10 18 Z")`  |
+| Call                         | Description                           |
+|------------------------------|---------------------------------------|
+| `(circle)`                   | Circle (inscribed in the node's box)  |
+| `(rect)`                     | Rectangle with sharp corners          |
+| `(rounded-rect DIM)`         | Rectangle with uniform corner radius. |
+| `(rounded-rect TL TR BR BL)` | Per-corner radii.                     |
+| `(svg-path STR)`             | Arbitrary SVG path data.              |
 
 ---
 
@@ -91,15 +91,16 @@ Creates a layout node. First arg can be a `style`; remaining args are child node
   (text "World" (size 16)))
 ```
 
-Children that evaluate to `void` or `'()` are silently skipped (useful for conditional children via `if`/`when`).
+Children that evaluate to `void` or `'()` are silently skipped.
 
 A `node` with no explicit `style` uses default flex layout.
 
 ---
 
-### `(image BASE64_STR [CLIP_SHAPE])`
+### image
 
-Creates an image node from a base64 encoded string (JPEG, PNG, WebP). Optionally specify a clip shape.
+Creates an image node from a base64 encoded string (only!). Optionally specify a clip shape. Clip shape can also 
+accept dimensions, although is not a full shape implementation see [below](#shape)
 
 ```scheme
 (image (get-payload 'image "") (circle))
@@ -107,7 +108,7 @@ Creates an image node from a base64 encoded string (JPEG, PNG, WebP). Optionally
 
 ---
 
-### `(text STRING [MODS...])`
+### text
 
 Creates a text node. First arg is the string content; remaining args are text modifiers.
 
@@ -127,14 +128,14 @@ Creates a text node. First arg is the string content; remaining args are text mo
 | `(size (unit))`   | Font size                                         |
 | `(color COLOR)`   | Text color                                        |
 | `(family STR)`    | Font family name. `"sans-serif"`, `"Inter"`, etc. |
-| `(weight N)`      | Font weight: 400 = regular, 700 = bold            |
+| `(weight N)`      | Font weight                                       |
 | `(italic)`        | Sets italic font style                            |
-| `(line-height N)` | Sets relative line height (e.g. `1.2`)            |
+| `(line-height N)` | Sets relative line height                         |
 | `(align SYM)`     | `'start`, `'center`, `'end`, `'justify`           |
 
 ---
 
-### `(shape KIND [FILL] [STROKE])`
+### shape
 
 Creates a shape node with optional fill and stroke.
 
@@ -146,7 +147,7 @@ Creates a shape node with optional fill and stroke.
   (fill (linear-gradient (hex "#eee") (hex "#ddd"))))
 ```
 
-#### Fill / Stroke wrappers
+#### Fill & stroke wrappers
 
 | Call                   | Description                        |
 |------------------------|------------------------------------|
@@ -156,8 +157,6 @@ Creates a shape node with optional fill and stroke.
 ---
 
 ## Style
-
-### `(style MODS...)`
 
 Creates a style from one or more style modifiers, applied left-to-right.
 
@@ -171,7 +170,7 @@ Creates a style from one or more style modifiers, applied left-to-right.
 
 ---
 
-### Style Modifiers — Property Functions
+### Property Functions
 
 These accept a value argument and return a style modifier. Use inside `(style ...)`.
 
@@ -197,7 +196,6 @@ These accept a value argument and return a style modifier. Use inside `(style ..
 | `(min-height DIM)` | `(px N)` / `(pct N)` / `(auto)` | Min height  |
 
 #### Spacing
-
 
 | Call                     | Args        | Description                   |
 |--------------------------|-------------|-------------------------------|
@@ -248,48 +246,5 @@ Zero-argument shorthands for common style modifiers. Use interchangeably with th
 
 ---
 
-## Error Handling
-
-All functions validate their arguments. Invalid inputs produce a **Scheme error** with a descriptive message and the generation **fails**. Errors are logged via `tracing::error!`.
-
-Examples:
-```
-direction: unknown value 'rwo', expected one of: row, column, row-reverse, column-reverse
-hex: invalid hex color "#GGG"
-node: unexpected argument type: IntV(42)
-```
-
----
-
 ## Full Example
-
-```scheme
-;; quote-bubble.scm
-
-(define username (get-payload 'username "Unknown"))
-(define content  (get-payload 'content ""))
-(define role     (get-payload 'user_role "user"))
-
-(define name-color
-  (cond
-    [(equal? role "creator")       (hex "#A682D1")]
-    [(equal? role "administrator") (hex "#58AB63")]
-    [else                          (hex "#4CA635")]))
-
-(node (style (flex-row) (align-items 'end) (padding (px 4)))
-
-  ;; Avatar
-  (node (style (width (px 36)) (height (px 36))
-               (align-items 'center) (justify-content 'center))
-    (node (style (absolute) (inset (px 0) (px 0) (px 0) (px 0)))
-      (shape (circle) (fill (linear-gradient (hex "#6DD5FA") (hex "#2980B9")))))
-    (text "AB" (size 14) (color (hex "#fff")) (family "sans-serif") (weight 700)))
-
-  ;; Bubble
-  (node (style (flex-column) (padding (px 12)) (max-width (px 500))
-               (margin-left (px 10)))
-    (node (style (absolute) (inset (px 0) (px 0) (px 0) (px 0)))
-      (shape (rounded-rect (px 16)) (fill (solid (hex "#EFFDDE")))))
-    (text username (size 15) (color name-color) (family "sans-serif") (weight 700))
-    (text content  (size 15) (color (hex "#000"))  (family "sans-serif"))))
-```
+See [dark](templates/dark.scm) or [light](templates/light.scm) templates.

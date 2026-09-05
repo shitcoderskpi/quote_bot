@@ -109,3 +109,350 @@ fn json_to_scheme(val: &serde_json::Value) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::node::Content;
+    use serde_json::json;
+
+    #[test]
+    fn json_null() {
+        assert_eq!(json_to_scheme(&json!(null)), "'()");
+    }
+
+    #[test]
+    fn json_bool_true() {
+        assert_eq!(json_to_scheme(&json!(true)), "#t");
+    }
+
+    #[test]
+    fn json_bool_false() {
+        assert_eq!(json_to_scheme(&json!(false)), "#f");
+    }
+
+    #[test]
+    fn json_integer() {
+        assert_eq!(json_to_scheme(&json!(42)), "42");
+    }
+
+    #[test]
+    fn json_float() {
+        let result = json_to_scheme(&json!(3.14));
+        assert!(result.starts_with("3.14"));
+    }
+
+    #[test]
+    fn json_string() {
+        assert_eq!(json_to_scheme(&json!("hello")), "\"hello\"");
+    }
+
+    #[test]
+    fn json_string_with_quotes() {
+        let result = json_to_scheme(&json!("say \"hi\""));
+        assert!(result.contains("\\\""), "should escape quotes: {}", result);
+    }
+
+    #[test]
+    fn json_string_with_backslash() {
+        let result = json_to_scheme(&json!("path\\to"));
+        assert!(result.contains("\\\\"), "should escape backslashes: {}", result);
+    }
+
+    #[test]
+    fn json_array() {
+        let result = json_to_scheme(&json!([1, 2, 3]));
+        assert_eq!(result, "(list 1 2 3)");
+    }
+
+    #[test]
+    fn json_empty_array() {
+        let result = json_to_scheme(&json!([]));
+        assert_eq!(result, "(list )");
+    }
+
+    #[test]
+    fn json_object() {
+        let result = json_to_scheme(&json!({"a": 1}));
+        assert!(result.contains("cons 'a 1"), "got: {}", result);
+    }
+
+    #[test]
+    fn json_nested() {
+        let val = json!({"items": [1, "two"], "flag": true});
+        let result = json_to_scheme(&val);
+        assert!(result.contains("list"), "got: {}", result);
+        assert!(result.contains("#t"), "got: {}", result);
+    }
+
+    #[test]
+    fn render_minimal_node() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            "(node (style (width (px 100)) (height (px 50))))",
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        assert!(matches!(node.content, Content::Group(ref c) if c.is_empty()));
+        assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
+        assert_eq!(node.style.layout.size.height, taffy::prelude::Dimension::length(50.0));
+    }
+
+    #[test]
+    fn render_shape_node() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            "(node (shape (rect) (fill (solid (hex \"#FF0000\")))))",
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_some()));
+    }
+
+    #[test]
+    fn render_text_from_payload() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'username "Default")))"#,
+            r#"{"username": "Alice"}"#,
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "Alice"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_text_payload_default() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'missing_key "fallback")))"#,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "fallback"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_avatar_initials() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'avatar_initials "")))"#,
+            r#"{"username": "John Doe"}"#,
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "JD"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_avatar_initials_single_name() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'avatar_initials "")))"#,
+            r#"{"username": "alice"}"#,
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "A"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_avatar_initials_three_names() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'avatar_initials "")))"#,
+            r#"{"username": "Foo Bar Baz"}"#,
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "FB"), // takes only first 2
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_avatar_colors_by_grad_id() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'avatar_color_top "")))"#,
+            r#"{"username": "X", "grad_id": 3}"#,
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "#51BB3F"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_bold() {
+        let mut t = Templater::new();
+        let payload = r#"{"content": "Hello bold world"}"#;
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            payload,
+            Some("Hello bold world".to_string()),
+            Some(vec![json!({"type": "bold", "offset": 6, "length": 4})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert_eq!(rich.text, "Hello bold world");
+                assert!(!rich.spans.is_empty(), "Should have entity spans");
+                assert_eq!(rich.spans[0].weight, Some(parley::FontWeight::BOLD));
+                assert_eq!(rich.spans[0].range, 6..10);
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_italic() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "hi there"}"#,
+            Some("hi there".to_string()),
+            Some(vec![json!({"type": "italic", "offset": 0, "length": 2})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                assert_eq!(rich.spans[0].italic, Some(true));
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_entities_link() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (text (get-payload 'content "")))"#,
+            r#"{"content": "click here"}"#,
+            Some("click here".to_string()),
+            Some(vec![json!({"type": "text_link", "offset": 6, "length": 4})]),
+        ).unwrap();
+        match &node.content {
+            Content::Text(rich) => {
+                // Links should have underline and a color
+                assert_eq!(rich.spans[0].underline, Some(true));
+                assert!(rich.spans[0].color.is_some());
+            }
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_nested_nodes() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (style (flex-column))
+                 (node (style (width (px 100)) (height (px 30))))
+                 (node (style (width (px 100)) (height (px 30)))))"#,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Group(children) => assert_eq!(children.len(), 2),
+            other => panic!("Expected Group with 2 children, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_with_style_modifiers() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(node (style (flex-row) (align-center) (justify-between)
+                         (padding (px 10)) (gap (px 5))
+                         (opacity 0.8) (rotate 45)))"#,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        assert!((node.style.opacity - 0.8).abs() < 0.01);
+        assert!((node.style.rotate_deg - 45.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn render_invalid_script_returns_error() {
+        let mut t = Templater::new();
+        let result = t.render_template(
+            "(this is not valid scheme +++",
+            "{}",
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn render_with_conditional() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r#"(if #t
+                 (node (style (width (px 100)) (height (px 100))))
+                 (node (style (width (px 50)) (height (px 50)))))"#,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
+        assert_eq!(node.style.layout.size.height, taffy::prelude::Dimension::length(100.0));
+    }
+
+    #[test]
+    fn render_with_gradients() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r##"(node (shape (rect) (fill (linear-gradient (hex "#FF0000") (hex "#0000FF")))))"##,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        match &node.content {
+            Content::Shape { fill: Some(crate::primitives::paint::Paint::LinearGradient { .. }), .. } => {}
+            other => panic!("Expected Shape with LinearGradient fill, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn render_rounded_rect() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r##"(node (shape (rounded-rect (px 10)) (fill (solid (hex "#000000")))))"##,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        assert!(matches!(node.content, Content::Shape { .. }));
+    }
+
+    #[test]
+    fn render_circle_shape() {
+        let mut t = Templater::new();
+        let node = t.render_template(
+            r##"(node (shape (circle (px 50)) (fill (solid (hex "#FF0000")))))"##,
+            "{}",
+            None,
+            None,
+        ).unwrap();
+        assert!(matches!(node.content, Content::Shape { .. }));
+    }
+}

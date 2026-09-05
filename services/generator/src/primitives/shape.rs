@@ -58,3 +58,128 @@ impl ShapeKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vp() -> Viewport {
+        Viewport { width: 1.0, height: 1.0 }
+    }
+
+    #[test]
+    fn corners_zero() {
+        let c = Corners::zero();
+        assert_eq!(c.top_left, 0.0);
+        assert_eq!(c.top_right, 0.0);
+        assert_eq!(c.bottom_right, 0.0);
+        assert_eq!(c.bottom_left, 0.0);
+    }
+
+    #[test]
+    fn corners_all() {
+        let c = Corners::all(12.5);
+        assert_eq!(c.top_left, 12.5);
+        assert_eq!(c.top_right, 12.5);
+        assert_eq!(c.bottom_right, 12.5);
+        assert_eq!(c.bottom_left, 12.5);
+    }
+
+    #[test]
+    fn corners_default_is_zero() {
+        let c = Corners::default();
+        assert_eq!(c.top_left, 0.0);
+        assert_eq!(c.bottom_right, 0.0);
+    }
+
+    #[test]
+    fn rect_zero_corners_bounding_box() {
+        let shape = ShapeKind::Rect { corners: Corners::zero() };
+        let path = shape.to_kurbo(100.0, 50.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 100.0).abs() < 1.0);
+        assert!((bb.height() - 50.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn rect_rounded_corners_bounding_box() {
+        let shape = ShapeKind::Rect { corners: Corners::all(10.0) };
+        let path = shape.to_kurbo(200.0, 80.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 200.0).abs() < 1.0);
+        assert!((bb.height() - 80.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn rect_asymmetric_corners() {
+        let corners = Corners {
+            top_left: 5.0,
+            top_right: 10.0,
+            bottom_right: 15.0,
+            bottom_left: 0.0,
+        };
+        let shape = ShapeKind::Rect { corners };
+        let path = shape.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 100.0).abs() < 1.0);
+        assert!((bb.height() - 100.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn circle_square_box() {
+        let path = ShapeKind::Circle.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 100.0).abs() < 1.0, "width={}", bb.width());
+        assert!((bb.height() - 100.0).abs() < 1.0, "height={}", bb.height());
+    }
+
+    #[test]
+    fn circle_rectangular_box_uses_min_dim() {
+        let path = ShapeKind::Circle.to_kurbo(200.0, 100.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 100.0).abs() < 1.0);
+        assert!((bb.height() - 100.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn ellipse_fills_box() {
+        let path = ShapeKind::Ellipse.to_kurbo(200.0, 100.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 200.0).abs() < 1.0);
+        assert!((bb.height() - 100.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn svg_path_valid() {
+        let shape = ShapeKind::Path {
+            data: "M 0 0 L 80 0 L 80 40 L 0 40 Z".to_string(),
+        };
+        let path = shape.to_kurbo(200.0, 200.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 80.0).abs() < 0.1);
+        assert!((bb.height() - 40.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn svg_path_invalid_falls_back_to_rect() {
+        let shape = ShapeKind::Path {
+            data: "not-a-path".to_string(),
+        };
+        let path = shape.to_kurbo(100.0, 50.0, vp(), 16.0);
+        let bb = path.bounding_box();
+        assert!((bb.width() - 100.0).abs() < 1.0);
+        assert!((bb.height() - 50.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn clip_delegates_to_inner() {
+        let inner = ShapeKind::Circle;
+        let clip = ShapeKind::Clip(Box::new(inner.clone()));
+        let direct = inner.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let via_clip = clip.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let bb1 = direct.bounding_box();
+        let bb2 = via_clip.bounding_box();
+        assert!((bb1.width() - bb2.width()).abs() < 0.01);
+        assert!((bb1.height() - bb2.height()).abs() < 0.01);
+    }
+}

@@ -133,3 +133,68 @@ impl RenderContext {
         Ok((width, height, pixels))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn render_context_creation() {
+        let ctx = RenderContext::new().await;
+        assert!(ctx.is_ok(), "Failed to create RenderContext: {:?}", ctx.err());
+    }
+
+    #[tokio::test]
+    async fn render_empty_scene() {
+        let mut ctx = RenderContext::new().await.expect("No GPU available");
+        let scene = Scene::new();
+        let result = ctx.render_scene_to_pixels(&scene, 10, 10);
+        assert!(result.is_ok(), "render failed: {:?}", result.err());
+        let (w, h, pixels) = result.unwrap();
+        assert_eq!(w, 10);
+        assert_eq!(h, 10);
+        assert_eq!(pixels.len(), (10 * 10 * 4) as usize);
+    }
+
+    #[tokio::test]
+    async fn render_scene_returns_correct_dimensions() {
+        let mut ctx = RenderContext::new().await.expect("No GPU available");
+        let scene = Scene::new();
+        for &(sw, sh) in &[(1, 1), (64, 64), (100, 200), (300, 150)] {
+            let (w, h, pixels) = ctx.render_scene_to_pixels(&scene, sw, sh).unwrap();
+            assert_eq!(w, sw, "width mismatch");
+            assert_eq!(h, sh, "height mismatch");
+            assert_eq!(pixels.len(), (sw * sh * 4) as usize);
+        }
+    }
+
+    #[tokio::test]
+    async fn render_filled_rect_has_nonzero_pixels() {
+        use vello::kurbo::{Affine, Rect};
+        use vello::peniko::{Brush, Fill};
+
+        let mut ctx = RenderContext::new().await.expect("No GPU available");
+        let mut scene = Scene::new();
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            &Brush::Solid(vello::peniko::Color::from_rgb8(255, 0, 0)),
+            None,
+            &Rect::new(0.0, 0.0, 10.0, 10.0),
+        );
+
+        let (w, h, pixels) = ctx.render_scene_to_pixels(&scene, 10, 10).unwrap();
+        assert_eq!(w, 10);
+        assert_eq!(h, 10);
+        let has_nonzero = pixels.iter().any(|&p| p != 0);
+        assert!(has_nonzero, "Scene with filled rect should have non-zero pixels");
+    }
+
+    #[tokio::test]
+    async fn render_transparent_scene_is_empty() {
+        let mut ctx = RenderContext::new().await.expect("No GPU available");
+        let scene = Scene::new();
+        let (_w, _h, pixels) = ctx.render_scene_to_pixels(&scene, 4, 4).unwrap();
+        assert!(pixels.iter().all(|&p| p == 0), "Empty scene should be fully transparent");
+    }
+}

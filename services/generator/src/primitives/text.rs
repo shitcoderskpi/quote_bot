@@ -156,3 +156,137 @@ impl RichText {
         layout
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_defaults() {
+        let rt = RichText::plain("hello");
+        assert_eq!(rt.text, "hello");
+        assert!(rt.spans.is_empty());
+        assert_eq!(rt.align, TextAlign::Start);
+        assert_eq!(rt.default_font_size, 16.0);
+        assert_eq!(rt.default_family, "sans-serif");
+        assert_eq!(rt.default_color, peniko::Color::BLACK);
+        assert_eq!(rt.default_weight, FontWeight::NORMAL);
+        assert!(!rt.default_italic);
+        assert!(!rt.default_underline);
+        assert!(!rt.default_strikethrough);
+        assert!(rt.default_line_height.is_none());
+        assert_eq!(rt.root_font_size, 16.0);
+    }
+
+    #[test]
+    fn plain_from_string_type() {
+        let rt = RichText::plain(String::from("owned"));
+        assert_eq!(rt.text, "owned");
+    }
+
+    #[test]
+    fn plain_empty_string() {
+        let rt = RichText::plain("");
+        assert_eq!(rt.text, "");
+    }
+
+    #[test]
+    fn with_span_pushes_span() {
+        let span = Span::new(0..5);
+        let rt = RichText::plain("hello").with_span(span);
+        assert_eq!(rt.spans.len(), 1);
+        assert_eq!(rt.spans[0].range, 0..5);
+    }
+
+    #[test]
+    fn with_span_chaining() {
+        let rt = RichText::plain("hello world")
+            .with_span(Span::new(0..5))
+            .with_span(Span::new(6..11));
+        assert_eq!(rt.spans.len(), 2);
+    }
+
+    #[test]
+    fn span_new_defaults() {
+        let s = Span::new(3..7);
+        assert_eq!(s.range, 3..7);
+        assert!(s.font_family.is_none());
+        assert!(s.font_size.is_none());
+        assert!(s.weight.is_none());
+        assert!(s.italic.is_none());
+        assert!(s.underline.is_none());
+        assert!(s.strikethrough.is_none());
+        assert!(s.color.is_none());
+        assert!(s.line_height.is_none());
+    }
+
+    #[test]
+    fn span_with_all_fields() {
+        let mut s = Span::new(0..1);
+        s.font_family = Some("monospace".into());
+        s.font_size = Some(24.0);
+        s.weight = Some(FontWeight::BOLD);
+        s.italic = Some(true);
+        s.underline = Some(true);
+        s.strikethrough = Some(true);
+        s.color = Some(peniko::Color::WHITE);
+        s.line_height = Some(1.5);
+        assert_eq!(s.font_family.as_deref(), Some("monospace"));
+        assert_eq!(s.font_size, Some(24.0));
+    }
+
+    #[test]
+    fn text_align_equality() {
+        assert_eq!(TextAlign::Start, TextAlign::Start);
+        assert_eq!(TextAlign::Center, TextAlign::Center);
+        assert_eq!(TextAlign::End, TextAlign::End);
+        assert_eq!(TextAlign::Justify, TextAlign::Justify);
+        assert_ne!(TextAlign::Start, TextAlign::End);
+    }
+
+    #[test]
+    fn layout_nonempty_text_has_positive_dims() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let rt = RichText::plain("Hello, world!");
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0, "width should be > 0, got {}", layout.width());
+        assert!(layout.height() > 0.0, "height should be > 0, got {}", layout.height());
+    }
+
+    #[test]
+    fn layout_empty_text() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let rt = RichText::plain("");
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert_eq!(layout.width(), 0.0);
+    }
+
+    #[test]
+    fn layout_respects_max_width() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let long_text = "a ".repeat(200);
+        let rt = RichText::plain(long_text);
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(100.0), viewport);
+        assert!(layout.width() <= 101.0, "width {} should be <= 100", layout.width());
+    }
+
+    #[test]
+    fn layout_with_spans() {
+        let mut font_cx = FontContext::new();
+        let mut layout_cx = LayoutContext::new();
+        let mut span = Span::new(0..5);
+        span.weight = Some(FontWeight::BOLD);
+        span.font_size = Some(32.0);
+        let rt = RichText::plain("Hello World").with_span(span);
+        let viewport = Viewport { width: 1.0, height: 1.0 };
+        let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0), viewport);
+        assert!(layout.width() > 0.0);
+        assert!(layout.height() > 0.0);
+    }
+}

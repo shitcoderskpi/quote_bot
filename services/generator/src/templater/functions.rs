@@ -674,3 +674,237 @@ fn is_void_or_empty(val: &SteelVal) -> bool {
         || matches!(val, SteelVal::ListV(l) if l.is_empty())
         || matches!(val, SteelVal::BoolV(false))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_6_char_no_hash() {
+        let c = parse_hex_color("FF0000").unwrap();
+        assert_eq!(c, vello::peniko::Color::from_rgba8(255, 0, 0, 255));
+    }
+
+    #[test]
+    fn hex_6_char_with_hash() {
+        let c = parse_hex_color("#00FF00").unwrap();
+        assert_eq!(c, vello::peniko::Color::from_rgba8(0, 255, 0, 255));
+    }
+
+    #[test]
+    fn hex_8_char_with_alpha() {
+        let c = parse_hex_color("#0000FF80").unwrap();
+        assert_eq!(c, vello::peniko::Color::from_rgba8(0, 0, 255, 128));
+    }
+
+    #[test]
+    fn hex_8_char_no_hash() {
+        let c = parse_hex_color("AABBCCDD").unwrap();
+        assert_eq!(c, vello::peniko::Color::from_rgba8(0xAA, 0xBB, 0xCC, 0xDD));
+    }
+
+    #[test]
+    fn hex_invalid_too_short() {
+        assert!(parse_hex_color("FFF").is_none());
+    }
+
+    #[test]
+    fn hex_invalid_too_long() {
+        assert!(parse_hex_color("AABBCCDDEEFF").is_none());
+    }
+
+    #[test]
+    fn hex_invalid_chars() {
+        assert!(parse_hex_color("ZZZZZZ").is_none());
+    }
+
+    #[test]
+    fn hex_empty() {
+        assert!(parse_hex_color("").is_none());
+    }
+
+    #[test]
+    fn hex_case_insensitive() {
+        let upper = parse_hex_color("AABB00").unwrap();
+        let lower = parse_hex_color("aabb00").unwrap();
+        assert_eq!(upper, lower);
+    }
+
+    #[test]
+    fn void_is_void_or_empty() {
+        assert!(is_void_or_empty(&SteelVal::Void));
+    }
+
+    #[test]
+    fn false_is_void_or_empty() {
+        assert!(is_void_or_empty(&SteelVal::BoolV(false)));
+    }
+
+    #[test]
+    fn true_is_not_void_or_empty() {
+        assert!(!is_void_or_empty(&SteelVal::BoolV(true)));
+    }
+
+    #[test]
+    fn int_is_not_void_or_empty() {
+        assert!(!is_void_or_empty(&SteelVal::IntV(42)));
+    }
+
+    #[test]
+    fn px_converts() {
+        let d = fn_px(SchemeNumber(100.0));
+        assert!(matches!(d, SchemeDimension::Length(v) if (v - 100.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn px_zero() {
+        let d = fn_px(SchemeNumber(0.0));
+        assert!(matches!(d, SchemeDimension::Length(v) if v == 0.0));
+    }
+
+    #[test]
+    fn pt_converts() {
+        let d = fn_pt(SchemeNumber(12.0));
+        match d {
+            SchemeDimension::Length(v) => assert!((v - 16.0).abs() < 0.01, "12pt = {}px", v),
+            _ => panic!("Expected Length"),
+        }
+    }
+
+    #[test]
+    fn pct_converts() {
+        let d = fn_pct(SchemeNumber(50.0));
+        assert!(matches!(d, SchemeDimension::Percent(v) if (v - 0.5).abs() < 0.001));
+    }
+
+    #[test]
+    fn pct_100() {
+        let d = fn_pct(SchemeNumber(100.0));
+        assert!(matches!(d, SchemeDimension::Percent(v) if (v - 1.0).abs() < 0.001));
+    }
+
+    #[test]
+    fn auto_dim() {
+        let d = fn_auto();
+        assert!(matches!(d, SchemeDimension::Auto));
+    }
+
+    #[test]
+    fn solid_wraps_color() {
+        let c = SchemeColor(vello::peniko::Color::BLACK);
+        let p = fn_solid(c);
+        assert!(matches!(p.0, Paint::Solid(_)));
+    }
+
+    #[test]
+    fn angle_wraps_degrees() {
+        let a = fn_angle(SchemeNumber(45.0));
+        assert_eq!(a.0, 45.0);
+    }
+
+    #[test]
+    fn stop_normalizes_offset() {
+        let s = fn_stop(SchemeNumber(50.0), SchemeColor(vello::peniko::Color::BLACK));
+        assert!((s.offset - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn fill_creates_shape_mod() {
+        let p = SchemePaint(Paint::solid(vello::peniko::Color::BLACK));
+        let m = fn_fill(p);
+        assert!(matches!(m, ShapeMod::Fill(_)));
+    }
+
+    #[test]
+    fn stroke_creates_shape_mod() {
+        let p = SchemePaint(Paint::solid(vello::peniko::Color::WHITE));
+        let m = fn_stroke(p, SchemeNumber(3.0));
+        match m {
+            ShapeMod::Stroke(s) => {
+                assert_eq!(s.width, 3.0);
+                assert_eq!(s.color, vello::peniko::Color::WHITE);
+            }
+            _ => panic!("Expected Stroke"),
+        }
+    }
+
+    #[test]
+    fn stroke_gradient_paint_falls_back_to_black() {
+        let p = SchemePaint(Paint::LinearGradient {
+            start: (0.0, 0.0),
+            end: (1.0, 1.0),
+            stops: vec![],
+            extend: Default::default(),
+        });
+        let m = fn_stroke(p, SchemeNumber(1.0));
+        match m {
+            ShapeMod::Stroke(s) => assert_eq!(s.color, vello::peniko::Color::BLACK),
+            _ => panic!("Expected Stroke"),
+        }
+    }
+
+    #[test]
+    fn width_height_fns() {
+        let w = fn_width(SchemeDimension::Length(100.0));
+        assert!(matches!(w, StyleMod::Width(_)));
+        let h = fn_height(SchemeDimension::Length(50.0));
+        assert!(matches!(h, StyleMod::Height(_)));
+    }
+
+    #[test]
+    fn opacity_fn() {
+        let o = fn_opacity(SchemeNumber(0.5));
+        assert!(matches!(o, StyleMod::Opacity(v) if (v - 0.5).abs() < 0.001));
+    }
+
+    #[test]
+    fn rotate_fn() {
+        let r = fn_rotate(SchemeNumber(90.0));
+        assert!(matches!(r, StyleMod::Rotate(v) if v == 90.0));
+    }
+
+    #[test]
+    fn size_fn() {
+        let m = fn_size(SchemeDimension::Length(20.0));
+        assert!(matches!(m, TextMod::Size(_)));
+    }
+
+    #[test]
+    fn color_fn() {
+        let m = fn_color(SchemeColor(vello::peniko::Color::WHITE));
+        assert!(matches!(m, TextMod::Color(_)));
+    }
+
+    #[test]
+    fn family_fn() {
+        let m = fn_family("serif".to_string());
+        assert!(matches!(m, TextMod::Family(f) if f == "serif"));
+    }
+
+    #[test]
+    fn weight_fn() {
+        let m = fn_weight(SchemeNumber(700.0));
+        match m {
+            TextMod::Weight(w) => assert_eq!(w, parley::FontWeight::new(700.0)),
+            _ => panic!("Expected Weight"),
+        }
+    }
+
+    #[test]
+    fn italic_fn() {
+        let m = fn_italic();
+        assert!(matches!(m, TextMod::Italic));
+    }
+
+    #[test]
+    fn line_height_fn() {
+        let m = fn_line_height(SchemeNumber(1.5));
+        assert!(matches!(m, TextMod::LineHeight(v) if (v - 1.5).abs() < 0.001));
+    }
+
+    #[test]
+    fn svg_path_creates_shape_kind() {
+        let s = fn_svg_path("M 0 0 L 10 10".to_string());
+        assert!(matches!(s.kind, ShapeKind::Path { ref data } if data == "M 0 0 L 10 10"));
+    }
+}

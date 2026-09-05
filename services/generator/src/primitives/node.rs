@@ -80,3 +80,127 @@ impl Node {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::paint::Paint;
+    use crate::primitives::shape::{Corners, ShapeKind};
+    use crate::primitives::text::RichText;
+
+    #[test]
+    fn shape_constructor_defaults() {
+        let node = Node::shape(
+            ShapeKind::Rect { corners: Corners::zero() },
+            Some(Paint::solid(vello::peniko::Color::BLACK)),
+        );
+        assert!(matches!(node.content, Content::Shape { ref kind, ref fill, ref stroke }
+            if matches!(kind, ShapeKind::Rect { .. })
+            && fill.is_some()
+            && stroke.is_none()
+        ));
+        assert_eq!(node.style.rotate_deg, 0.0);
+        assert_eq!(node.style.opacity, 1.0);
+        assert!(node.style.clip.is_none());
+    }
+
+    #[test]
+    fn shape_constructor_no_fill() {
+        let node = Node::shape(ShapeKind::Circle, None);
+        assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_none()));
+    }
+
+    #[test]
+    fn text_constructor() {
+        let rt = RichText::plain("hello");
+        let node = Node::text(rt);
+        match &node.content {
+            Content::Text(rich) => assert_eq!(rich.text, "hello"),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn group_constructor_with_children() {
+        let children = vec![
+            Node::shape(ShapeKind::Circle, None),
+            Node::text(RichText::plain("a")),
+        ];
+        let node = Node::group(children);
+        match &node.content {
+            Content::Group(c) => assert_eq!(c.len(), 2),
+            other => panic!("Expected Group, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn group_constructor_empty() {
+        let node = Node::group(vec![]);
+        match &node.content {
+            Content::Group(c) => assert!(c.is_empty()),
+            other => panic!("Expected empty Group, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn image_constructor() {
+        let pixels = vec![255u8; 4];
+        let image_data = vello::peniko::ImageData {
+            data: vello::peniko::Blob::new(std::sync::Arc::new(pixels)),
+            format: vello::peniko::ImageFormat::Rgba8,
+            alpha_type: vello::peniko::ImageAlphaType::Alpha,
+            width: 1,
+            height: 1,
+        };
+        let brush = std::sync::Arc::new(ImageBrush::new(image_data));
+        let node = Node::image(brush, Some(ShapeKind::Circle));
+        assert!(matches!(node.content, Content::Image { ref clip, .. } if clip.is_some()));
+    }
+
+    #[test]
+    fn image_constructor_no_clip() {
+        let pixels = vec![0u8; 4];
+        let image_data = vello::peniko::ImageData {
+            data: vello::peniko::Blob::new(std::sync::Arc::new(pixels)),
+            format: vello::peniko::ImageFormat::Rgba8,
+            alpha_type: vello::peniko::ImageAlphaType::Alpha,
+            width: 1,
+            height: 1,
+        };
+        let brush = std::sync::Arc::new(ImageBrush::new(image_data));
+        let node = Node::image(brush, None);
+        assert!(matches!(node.content, Content::Image { ref clip, .. } if clip.is_none()));
+    }
+
+    #[test]
+    fn with_style_replaces_style() {
+        let node = Node::shape(ShapeKind::Circle, None);
+        assert_eq!(node.style.opacity, 1.0);
+
+        let mut custom = Style::default();
+        custom.opacity = 0.5;
+        custom.rotate_deg = 45.0;
+        let node = node.with_style(custom);
+        assert_eq!(node.style.opacity, 0.5);
+        assert_eq!(node.style.rotate_deg, 45.0);
+    }
+
+    #[test]
+    fn content_debug_shape() {
+        let c = Content::Shape {
+            kind: ShapeKind::Circle,
+            fill: None,
+            stroke: None,
+        };
+        let dbg = format!("{:?}", c);
+        assert!(dbg.contains("Shape"));
+        assert!(dbg.contains("Circle"));
+    }
+
+    #[test]
+    fn content_debug_group() {
+        let c = Content::Group(vec![]);
+        let dbg = format!("{:?}", c);
+        assert!(dbg.contains("Group"));
+    }
+}

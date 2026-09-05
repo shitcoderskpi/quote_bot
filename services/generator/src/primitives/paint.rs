@@ -79,3 +79,99 @@ pub struct Stroke {
     pub width: f64,
     pub color: Color,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vp() -> Viewport {
+        Viewport { width: 1.0, height: 1.0 }
+    }
+
+    fn two_stops() -> Vec<Stop> {
+        vec![
+            Stop { offset: 0.0, color: Color::BLACK },
+            Stop { offset: 1.0, color: Color::WHITE },
+        ]
+    }
+
+    #[test]
+    fn solid_to_brush() {
+        let paint = Paint::Solid(Color::BLACK);
+        let brush = paint.to_brush(100.0, 100.0, vp(), 16.0);
+        assert!(matches!(brush, Brush::Solid(_)));
+    }
+
+    #[test]
+    fn solid_constructor() {
+        let paint = Paint::solid(Color::WHITE);
+        assert!(matches!(paint, Paint::Solid(c) if c == Color::WHITE));
+    }
+
+    #[test]
+    fn linear_gradient_to_brush() {
+        let paint = Paint::LinearGradient {
+            start: (0.0, 0.0),
+            end: (1.0, 1.0),
+            stops: two_stops(),
+            extend: Extend::default(),
+        };
+        let brush = paint.to_brush(200.0, 100.0, vp(), 16.0);
+        assert!(matches!(brush, Brush::Gradient(_)));
+    }
+
+    #[test]
+    fn linear_gradient_endpoints_scaled() {
+        let paint = Paint::LinearGradient {
+            start: (0.0, 0.0),
+            end: (1.0, 1.0),
+            stops: two_stops(),
+            extend: Extend::default(),
+        };
+        let brush = paint.to_brush(200.0, 100.0, vp(), 16.0);
+        assert!(matches!(brush, Brush::Gradient(_)));
+    }
+
+    #[test]
+    fn radial_gradient_to_brush() {
+        let paint = Paint::RadialGradient {
+            center: (0.5, 0.5),
+            radius: 0.5,
+            stops: two_stops(),
+            extend: Extend::default(),
+        };
+        let brush = paint.to_brush(100.0, 100.0, vp(), 16.0);
+        assert!(matches!(brush, Brush::Gradient(_)));
+    }
+
+    #[test]
+    fn sweep_gradient_to_brush() {
+        let paint = Paint::SweepGradient {
+            center: (0.5, 0.5),
+            start_angle: 0.0,
+            end_angle: 360.0,
+            stops: two_stops(),
+            extend: Extend::default(),
+        };
+        let brush = paint.to_brush(100.0, 100.0, vp(), 16.0);
+        assert!(matches!(brush, Brush::Gradient(_)));
+    }
+
+    #[test]
+    fn build_stops_maps_offsets_and_colors() {
+        let stops = vec![
+            Stop { offset: 0.0, color: Color::BLACK },
+            Stop { offset: 0.5, color: Color::from_rgb8(128, 128, 128) },
+            Stop { offset: 1.0, color: Color::WHITE },
+        ];
+        let cs: ColorStops = Paint::build_stops(&stops);
+        assert_eq!(cs.len(), 3);
+    }
+
+    #[test]
+    fn stroke_fields() {
+        let s = Stroke { width: 2.5, color: Color::BLACK };
+        assert_eq!(s.width, 2.5);
+        assert_eq!(s.color, Color::BLACK);
+    }
+}
