@@ -73,6 +73,7 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("link-color", fn_link_color);
     engine.register_fn("code-family", fn_code_family);
     engine.register_fn("line-height", fn_line_height);
+    engine.register_fn("wrap", fn_wrap);
     engine.register_fn("align", fn_text_align);
     engine.register_fn("string-byte-length", |s: String| s.len());
     engine.register_fn("%make-style", fn_make_style);
@@ -399,6 +400,7 @@ fn fn_italic() -> TextMod { TextMod::Italic }
 fn fn_link_color(c: SchemeColor) -> TextMod { TextMod::LinkColor(c.0) }
 fn fn_code_family(s: String) -> TextMod { TextMod::CodeFamily(s) }
 fn fn_line_height(v: SchemeNumber) -> TextMod { TextMod::LineHeight(v.0 as f32) }
+fn fn_wrap(b: bool) -> TextMod { TextMod::Wrap(b) }
 
 fn fn_text_align(val: SteelVal) -> Result<TextMod, String> {
     let s = symbol_str(&val, "align")?;
@@ -905,6 +907,15 @@ mod tests {
     fn line_height_fn() {
         let m = fn_line_height(SchemeNumber(1.5));
         assert!(matches!(m, TextMod::LineHeight(v) if (v - 1.5).abs() < epsilon()));
+    }
+
+    #[test]
+    fn wrap_fn() {
+        let m = fn_wrap(false);
+        match m {
+            TextMod::Wrap(b) => assert!(!b),
+            _ => panic!("Expected Wrap"),
+        }
     }
 
     #[test]

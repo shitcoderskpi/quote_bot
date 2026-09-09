@@ -131,6 +131,7 @@ Creates a text node. First arg is the string content; remaining args are text mo
 | `(weight N)`      | Font weight                                       |
 | `(italic)`        | Sets italic font style                            |
 | `(line-height N)` | Sets relative line height                         |
+| `(wrap BOOL)`     | Sets whether text should wrap (`#t` or `#f`)      |
 | `(align SYM)`     | `'start`, `'center`, `'end`, `'justify`           |
 
 ---

@@ -48,6 +48,7 @@ pub struct RichText {
     pub text: String,
     pub spans: Vec<Span>,
     pub align: TextAlign,
+    pub wrap: bool,
     pub default_font_size: f64,
     pub default_family: String,
     pub default_color: peniko::Color,
@@ -65,6 +66,7 @@ impl RichText {
             text: text.into(),
             spans: Vec::new(),
             align: TextAlign::Start,
+            wrap: true,
             default_font_size: 16.0,
             default_family: "sans-serif".to_string(),
             default_color: peniko::Color::BLACK,
@@ -145,7 +147,12 @@ impl RichText {
         }
 
         let mut layout = builder.build(&self.text);
-        layout.break_all_lines(max_width.map(|w| w as f32));
+        if self.wrap {
+            layout.break_all_lines(max_width.map(|w| w as f32));
+        } else {
+            layout.break_all_lines(None);
+        }
+
         let alignment = match self.align {
             TextAlign::Start => Alignment::Start,
             TextAlign::Center => Alignment::Center,
@@ -167,6 +174,7 @@ mod tests {
         assert_eq!(rt.text, "hello");
         assert!(rt.spans.is_empty());
         assert_eq!(rt.align, TextAlign::Start);
+        assert!(rt.wrap);
         assert_eq!(rt.default_font_size, 16.0);
         assert_eq!(rt.default_family, "sans-serif");
         assert_eq!(rt.default_color, peniko::Color::BLACK);

@@ -71,6 +71,6 @@
           (node (style (hidden)))))
 
     (text content
-          (size (pt 15)) (color (hex "#D8DFE5")) (family "SF Pro Display")
+          (size (pt 15)) (color (hex "#D8DFE5")) (family "Geist Light")
           (link-color theme-link-color)
           (code-family theme-code-family))))

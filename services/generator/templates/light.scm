@@ -58,7 +58,7 @@
     (node (style (flex-row) (align-items 'center) (justify-content 'space-between)
                  (margin-bottom (px 4)) (gap (px 6)))
       (text username
-            (size (pt 15)) (color (hex "#4CA635")) (family "sans-serif") (weight 700))
+            (size (pt 15)) (color (hex avatar-top)) (family "sans-serif") (weight 700) (wrap #f))
       (if (not (equal? raw-status ""))
           (node (style (direction 'row) (align-items 'center) (justify-content 'center)
                        (padding-xy (px 6) (px 0)) (margin-right (px -6)))

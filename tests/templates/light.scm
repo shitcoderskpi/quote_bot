@@ -21,7 +21,7 @@
 (define avatar-bottom (get-payload 'avatar_color_bottom "#dd0000"))
 (define has-image? (not (equal? (get-payload 'image "") "")))
 
-(define theme-link-color (hex "#4B8FCA"))
+(define theme-link-color (hex "#4CA635"))
 (define theme-code-family "monospace")
 
 (node (style (flex-row) (align-items 'end)
@@ -48,12 +48,12 @@
     (node (style (absolute)
                  (inset (px 0) (px 0) (px 0) (px 0)))
       (shape (rounded-rect (px 16) (px 16) (px 16) (px 0))
-             (fill (solid (hex "#2A2F33")))))
+             (fill (solid (hex "#EFFDDE")))))
              
     (node (style (absolute) (left (px -10)) (bottom (px 0))
                  (width (px 11)) (height (px 18)))
       (shape (svg-path "M 11 0 Q 11 18 0 18 L 11 18 Z")
-             (fill (solid (hex "#2A2F33")))))
+             (fill (solid (hex "#EFFDDE")))))
 
     (node (style (flex-row) (align-items 'center) (justify-content 'space-between)
                  (margin-bottom (px 4)) (gap (px 6)))
@@ -71,6 +71,6 @@
           (node (style (hidden)))))
 
     (text content
-          (size (pt 15)) (color (hex "#D8DFE5")) (family "SF Pro Display")
+          (size (pt 15)) (color (hex "#000000")) (family "Geist Light")
           (link-color theme-link-color)
           (code-family theme-code-family))))

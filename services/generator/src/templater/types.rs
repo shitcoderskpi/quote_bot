@@ -221,6 +221,7 @@ pub enum TextMod {
     Align(crate::primitives::text::TextAlign),
     LinkColor(vello::peniko::Color),
     CodeFamily(String),
+    Wrap(bool),
 }
 
 impl Custom for TextMod {}
@@ -245,6 +246,7 @@ impl TextMod {
             TextMod::Strikethrough => rich.default_strikethrough = true,
             TextMod::LineHeight(lh) => rich.default_line_height = Some(*lh),
             TextMod::Align(a) => rich.align = *a,
+            TextMod::Wrap(w) => rich.wrap = *w,
             TextMod::LinkColor(_) | TextMod::CodeFamily(_) => {}
         }
     }
