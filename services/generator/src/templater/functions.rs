@@ -9,7 +9,7 @@ use steel::steel_vm::register_fn::RegisterFn;
 use std::sync::Arc;
 use taffy::prelude::*;
 use vello::peniko::ImageBrush;
-
+use crate::templater::types::TextMod::Weight;
 use super::types::*;
 
 pub fn register_all(engine: &mut Engine) {
@@ -67,6 +67,15 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("color", fn_color);
     engine.register_fn("family", fn_family);
     engine.register_fn("weight", fn_weight);
+    engine.register_fn("thin", || Weight(parley::FontWeight::new(100.0)));
+    engine.register_fn("extra-light", || Weight(parley::FontWeight::new(200.0)));
+    engine.register_fn("light", || Weight(parley::FontWeight::new(300.0)));
+    engine.register_fn("regular", || Weight(parley::FontWeight::new(400.0)));
+    engine.register_fn("medium", || Weight(parley::FontWeight::new(500.0)));
+    engine.register_fn("semi-bold", || Weight(parley::FontWeight::new(600.0)));
+    engine.register_fn("bold", || Weight(parley::FontWeight::new(700.0)));
+    engine.register_fn("extra-bold", || Weight(parley::FontWeight::new(800.0)));
+    engine.register_fn("black", || Weight(parley::FontWeight::new(900.0)));
     engine.register_fn("italic", fn_italic);
     engine.register_fn("underline", || TextMod::Underline);
     engine.register_fn("strikethrough", || TextMod::Strikethrough);
@@ -395,7 +404,7 @@ fn fn_rotate(v: SchemeNumber) -> StyleMod { StyleMod::Rotate(v.0) }
 fn fn_size(d: SchemeDimension) -> TextMod { TextMod::Size(d) }
 fn fn_color(c: SchemeColor) -> TextMod { TextMod::Color(c.0) }
 fn fn_family(s: String) -> TextMod { TextMod::Family(s) }
-fn fn_weight(v: SchemeNumber) -> TextMod { TextMod::Weight(parley::FontWeight::new(v.0 as f32)) }
+fn fn_weight(v: SchemeNumber) -> TextMod { Weight(parley::FontWeight::new(v.0 as f32)) }
 fn fn_italic() -> TextMod { TextMod::Italic }
 fn fn_link_color(c: SchemeColor) -> TextMod { TextMod::LinkColor(c.0) }
 fn fn_code_family(s: String) -> TextMod { TextMod::CodeFamily(s) }

@@ -4,17 +4,16 @@ version = "0.1.1"
 edition = "2024"
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.1"
 image = { version = "0.25.10", features = ["webp"] }
-parley = "0.10.0"
+parley = "0.11.1"
 redis = { version = "1.2.4", features = ["tokio-comp"] }
 tokio = { version = "1.52.3", features = ["full"] }
-vello = { version = "0.9.0", features = ["wgpu"] }
-zstd = "0.13.3"
+vello = { version = "0.10.0", features = ["wgpu"] }
+zstd = "0.14.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 thiserror = "2.0.18"
-serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 steel-core = "0.8.2"
 taffy = "0.12.1"

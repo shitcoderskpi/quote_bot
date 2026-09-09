@@ -21,6 +21,7 @@
 (define avatar-bottom (get-payload 'avatar_color_bottom "#dd0000"))
 (define has-image? (not (equal? (get-payload 'image "") "")))
 
+(define theme-bg-color (hex "#2A2F33"))
 (define theme-link-color (hex "#4B8FCA"))
 (define theme-code-family "monospace")
 
@@ -39,26 +40,26 @@
     (if has-image?
         (image (get-payload 'image "") (circle (px 36)))
         (text avatar-initials
-              (size (pt 14)) (color (hex "#ffffff")) (family "sans-serif") (weight 700))))
+              (size (pt 14)) (color (hex "#ffffff")) (family "sans-serif") (bold))))
 
   (node (style (direction 'column) (relative)
                (padding (px 10) (px 14) (px 14) (px 10))
-               (max-width (px 500)))
+               (max-width (px 400)))
 
     (node (style (absolute)
                  (inset (px 0) (px 0) (px 0) (px 0)))
       (shape (rounded-rect (px 16) (px 16) (px 16) (px 0))
-             (fill (solid (hex "#2A2F33")))))
+             (fill (solid theme-bg-color))))
              
     (node (style (absolute) (left (px -10)) (bottom (px 0))
                  (width (px 11)) (height (px 18)))
       (shape (svg-path "M 11 0 Q 11 18 0 18 L 11 18 Z")
-             (fill (solid (hex "#2A2F33")))))
+             (fill (solid theme-bg-color))))
 
     (node (style (flex-row) (align-items 'center) (justify-content 'space-between)
                  (margin-bottom (px 4)) (gap (px 6)))
       (text username
-            (size (pt 15)) (color (hex avatar-top)) (family "sans-serif") (weight 700) (wrap #f))
+            (size (pt 15)) (color (hex avatar-top)) (family "sans-serif") (bold) (wrap #f))
       (if (not (equal? raw-status ""))
           (node (style (direction 'row) (align-items 'center) (justify-content 'center)
                        (padding-xy (px 6) (px 0)) (margin-right (px -6)))
@@ -67,7 +68,7 @@
               (shape (rounded-rect (px 100))
                      (fill (solid status-bg))))
             (text raw-status
-                  (size (pt 13)) (color status-color) (family "sans-serif")))
+                  (size (pt 13)) (color status-color) (family "sans-serif") (wrap #f)))
           (node (style (hidden)))))
 
     (text content

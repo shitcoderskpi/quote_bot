@@ -130,6 +130,10 @@ Creates a text node. First arg is the string content; remaining args are text mo
 | `(family STR)`    | Font family name. `"sans-serif"`, `"Inter"`, etc. |
 | `(weight N)`      | Font weight                                       |
 | `(italic)`        | Sets italic font style                            |
+| `(underline)`     | Adds an underline                                 |
+| `(strikethrough)` | Adds a strikethrough                              |
+| `(link-color C)`  | Sets color for links                              |
+| `(code-family S)` | Sets font family for inline code                  |
 | `(line-height N)` | Sets relative line height                         |
 | `(wrap BOOL)`     | Sets whether text should wrap (`#t` or `#f`)      |
 | `(align SYM)`     | `'start`, `'center`, `'end`, `'justify`           |
@@ -244,6 +248,15 @@ Zero-argument shorthands for common style modifiers. Use interchangeably with th
 | `(hidden)`          | `(display 'none)`                  |
 | `(absolute)`        | `(position 'absolute)`             |
 | `(relative)`        | `(position 'relative)`             |
+| `(thin)`            | `(weight 100)`                     |
+| `(extra-light)`     | `(weight 200)`                     |
+| `(light)`           | `(weight 300)`                     |
+| `(regular)`         | `(weight 400)`                     |
+| `(medium)`          | `(weight 500)`                     |
+| `(semi-bold)`       | `(weight 600)`                     |
+| `(bold)`            | `(weight 700)`                     |
+| `(extra-bold)`      | `(weight 800)`                     |
+| `(black)`           | `(weight 900)`                     |
 
 ---
 

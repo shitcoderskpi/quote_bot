@@ -1,6 +1,3 @@
-> [!WARNING]
-> This is the **`steel`** branch -- an experimental branch that may contain unstable, incomplete, or breaking changes.
-
 ## Installation
 ```bash
 git clone --recursive https://github.com/shitcoderskpi/quote_bot.git
