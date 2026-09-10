@@ -2,6 +2,7 @@ use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use vello::kurbo::Rect;
 use vello::Scene;
+use crate::renderer::SceneTask;
 
 mod compressor;
 mod config;
@@ -10,15 +11,14 @@ mod templater;
 mod primitives;
 mod renderer;
 
-fn process_job(
+async fn process_job<'a>(
     raw: &str,
     cfg: &config::Config,
     templater: &mut templater::Templater,
     renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    
-    // Parse input message wrapper
+    buf: &'a mut Vec<u8>,
+) -> Result<&'a mut Vec<u8>, Box<dyn std::error::Error>> {
     let input_msg: serde_json::Value = serde_json::from_str(raw)?;
     let dpi = input_msg.get("dpi").and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(cfg.dpi);
 
@@ -51,7 +51,13 @@ fn process_job(
     let mut scaled_scene = Scene::new();
     scaled_scene.append(&scene, Some(vello::kurbo::Affine::scale(scale)));
 
-    let (w, h, pixels) = render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height)?;
+    let (rx, task) = SceneTask::new(scaled_scene, scaled_width, scaled_height);
+    render_ctx.send_render_task(task).await;
+    let (w, h, pixels) = match rx.await {
+        Ok(Ok(data)) => data,
+        Ok(Err(e)) => panic!("{}", e),
+        Err(e) => panic!("GPU worker died before responding: {}", e),
+    };
     info!("Rendered {}x{}", w, h);
 
     let mut webp_data = std::io::Cursor::new(Vec::new());
@@ -68,8 +74,12 @@ fn process_job(
 
     let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, header, b64_img);
 
-    let compressed = compressor::compress(&json_res, 9)?;
-    Ok(compressed)
+    buf.resize(compressor::max_compressed_size(json_res.len()), 0);
+
+    let n = compressor::compress(&json_res, 9, buf.as_mut_slice())?;
+    buf.truncate(n);
+
+    Ok(buf)
 }
 
 #[tokio::main]
@@ -89,6 +99,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
     let mut queue = redis_queue::RedisQueue::connect(&cfg).await?;
+    let mut decmpd = String::new();
+    let mut cmpd: Vec<u8> = Vec::new();
 
     loop {
         let payload = match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
@@ -100,7 +112,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let raw = match compressor::decompress(&payload) {
+        decmpd.clear();
+        match compressor::decompress(&payload, &mut decmpd) {
             Ok(r) => r,
             Err(e) => {
                 error!("Failed to decompress job: {}", e);
@@ -108,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match process_job(&raw, &cfg, &mut templater, &mut renderer, &mut render_ctx) {
+        match process_job(&decmpd, &cfg, &mut templater, &mut renderer, &mut render_ctx, &mut cmpd).await {
             Ok(result) => {
                 if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
                     error!("Failed to enqueue result: {}", e);

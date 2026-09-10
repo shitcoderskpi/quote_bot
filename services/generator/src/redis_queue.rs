@@ -26,7 +26,7 @@ impl RedisQueue {
         }).await.unwrap()
     }
 
-    pub async fn enqueue(&mut self, queue: &str, payload: Vec<u8>) -> Result<(), RedisError> {
+    pub async fn enqueue(&mut self, queue: &str, payload: &Vec<u8>) -> Result<(), RedisError> {
         let _: () = self.conn.lpush(queue, payload).await?;
         Ok(())
     }

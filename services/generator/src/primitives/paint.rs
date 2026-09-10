@@ -44,7 +44,7 @@ impl Paint {
             .into()
     }
     
-    pub fn to_brush(&self, box_w: f64, box_h: f64, _viewport: Viewport, _font_size: f64) -> Brush {
+    pub fn to_brush(&self, box_w: f64, box_h: f64) -> Brush {
         match self {
             Paint::Solid(c) => Brush::Solid(*c),
             Paint::LinearGradient { start, end, stops, extend } => {
@@ -84,10 +84,6 @@ pub struct Stroke {
 mod tests {
     use super::*;
 
-    fn vp() -> Viewport {
-        Viewport { width: 1.0, height: 1.0 }
-    }
-
     fn two_stops() -> Vec<Stop> {
         vec![
             Stop { offset: 0.0, color: Color::BLACK },
@@ -98,7 +94,7 @@ mod tests {
     #[test]
     fn solid_to_brush() {
         let paint = Paint::Solid(Color::BLACK);
-        let brush = paint.to_brush(100.0, 100.0, vp(), 16.0);
+        let brush = paint.to_brush(100.0, 100.0);
         assert!(matches!(brush, Brush::Solid(_)));
     }
 
@@ -116,7 +112,7 @@ mod tests {
             stops: two_stops(),
             extend: Extend::default(),
         };
-        let brush = paint.to_brush(200.0, 100.0, vp(), 16.0);
+        let brush = paint.to_brush(200.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
     }
 
@@ -128,7 +124,7 @@ mod tests {
             stops: two_stops(),
             extend: Extend::default(),
         };
-        let brush = paint.to_brush(200.0, 100.0, vp(), 16.0);
+        let brush = paint.to_brush(200.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
     }
 
@@ -140,7 +136,7 @@ mod tests {
             stops: two_stops(),
             extend: Extend::default(),
         };
-        let brush = paint.to_brush(100.0, 100.0, vp(), 16.0);
+        let brush = paint.to_brush(100.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
     }
 
@@ -153,7 +149,7 @@ mod tests {
             stops: two_stops(),
             extend: Extend::default(),
         };
-        let brush = paint.to_brush(100.0, 100.0, vp(), 16.0);
+        let brush = paint.to_brush(100.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
     }
 

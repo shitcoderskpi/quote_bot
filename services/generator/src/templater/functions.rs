@@ -15,6 +15,10 @@ use super::types::*;
 pub fn register_all(engine: &mut Engine) {
     engine.register_fn("px", fn_px);
     engine.register_fn("pt", fn_pt);
+    engine.register_fn("min-content", fn_min_content);
+    engine.register_fn("max-content", fn_max_content);
+    engine.register_fn("fit-content", fn_fit_content);
+    engine.register_fn("stretch", fn_stretch);
     engine.register_fn("pct", fn_pct);
     engine.register_fn("auto", fn_auto);
     engine.register_fn("hex", fn_hex);
@@ -119,6 +123,22 @@ fn fn_px(v: SchemeNumber) -> SchemeDimension {
 
 fn fn_pt(v: SchemeNumber) -> SchemeDimension {
     SchemeDimension::Length((v.0 * 1.333333) as f32)
+}
+
+fn fn_min_content() -> SchemeDimension {
+    SchemeDimension::MinContent
+}
+
+fn fn_max_content() -> SchemeDimension {
+    SchemeDimension::MaxContent
+}
+
+fn fn_fit_content() -> SchemeDimension {
+    SchemeDimension::FitContent
+}
+
+fn fn_stretch() -> SchemeDimension {
+    SchemeDimension::Stretch
 }
 
 fn fn_pct(v: SchemeNumber) -> SchemeDimension {

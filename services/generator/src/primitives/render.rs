@@ -47,7 +47,7 @@ impl Renderer {
                     style,
                     |_, _| 0.0,
                     |known_dims, avail_space| {
-                        Self::measure(viewport, font_cx, layout_cx, ctx, known_dims, avail_space)
+                        Self::measure(font_cx, layout_cx, ctx, known_dims, avail_space)
                     }
                 )
             }
@@ -57,8 +57,7 @@ impl Renderer {
         Ok((layout.size.width as f64, layout.size.height as f64))
     }
 
-    fn measure(viewport: Viewport,
-               font_cx: &mut FontContext,
+    fn measure(font_cx: &mut FontContext,
                layout_cx: &mut LayoutContext<Brush>,
                ctx: Option<&mut Content>,
                known_dims: Size<Option<f32>>,
@@ -72,7 +71,7 @@ impl Renderer {
                 }
             });
 
-            let layout = rich.layout(font_cx, layout_cx, max_width, viewport);
+            let layout = rich.layout(font_cx, layout_cx, max_width);
             Size { width: layout.width(), height: layout.height() }
         } else if let Some(Content::Image { image, .. }) = ctx {
             let iw = image.image.width as f32;
@@ -127,15 +126,15 @@ impl Renderer {
         
         let needs_layer = node.style.clip.is_some() || node.style.opacity < 1.0;
         if needs_layer {
-            let clip_shape = node.style.clip.as_ref().map(|c| c.to_kurbo(w, h, viewport, font_size)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.1));
+            let clip_shape = node.style.clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.1));
             scene.push_layer(Fill::NonZero, BlendMode::default(), node.style.opacity, transform, &clip_shape);
         }
         
         match &node.content {
             Content::Shape { kind, fill, stroke } => {
-                let path = kind.to_kurbo(w, h, viewport, font_size);
+                let path = kind.to_kurbo(w, h);
                 if let Some(paint) = fill {
-                    let brush = paint.to_brush(w, h, viewport, font_size);
+                    let brush = paint.to_brush(w, h);
                     scene.fill(Fill::NonZero, transform, &brush, None, &path);
                 }
                 if let Some(s) = stroke {
@@ -144,11 +143,11 @@ impl Renderer {
                 }
             }
             Content::Text(rich) => {
-                let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w), viewport);
+                let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w));
                 draw_text_layout(scene, transform, &text_layout);
             }
             Content::Image { image, clip } => {
-                let clip_shape = clip.as_ref().map(|c| c.to_kurbo(w, h, viewport, font_size)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.1));
+                let clip_shape = clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.01));
                 let brush_transform = cover_fit_transform(image, w, h);
                 scene.fill(Fill::NonZero, transform, &Brush::Image(image.as_ref().clone()), Some(brush_transform), &clip_shape);
             }

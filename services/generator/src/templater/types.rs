@@ -25,6 +25,10 @@ impl FromSteelVal for SchemeNumber {
 pub enum SchemeDimension {
     Length(f32),
     Percent(f32),
+    MinContent,
+    MaxContent,
+    FitContent,
+    Stretch,
     Auto,
 }
 
@@ -35,6 +39,10 @@ impl SchemeDimension {
         match self {
             SchemeDimension::Length(v) => Dimension::length(*v),
             SchemeDimension::Percent(v) => Dimension::percent(*v),
+            SchemeDimension::MinContent => Dimension::min_content(),
+            SchemeDimension::MaxContent => Dimension::max_content(),
+            SchemeDimension::FitContent => Dimension::fit_content(),
+            SchemeDimension::Stretch => Dimension::stretch(),
             SchemeDimension::Auto => Dimension::auto(),
         }
     }
@@ -43,7 +51,7 @@ impl SchemeDimension {
         match self {
             SchemeDimension::Length(v) => LengthPercentage::length(*v),
             SchemeDimension::Percent(v) => LengthPercentage::percent(*v),
-            SchemeDimension::Auto => LengthPercentage::length(0.0),
+            _ => LengthPercentage::length(0.0),
         }
     }
 
@@ -51,7 +59,7 @@ impl SchemeDimension {
         match self {
             SchemeDimension::Length(v) => LengthPercentageAuto::length(*v),
             SchemeDimension::Percent(v) => LengthPercentageAuto::percent(*v),
-            SchemeDimension::Auto => LengthPercentageAuto::auto(),
+            _ => LengthPercentageAuto::auto(),
         }
     }
 
@@ -59,7 +67,7 @@ impl SchemeDimension {
         match self {
             SchemeDimension::Length(v) => *v as f64,
             SchemeDimension::Percent(v) => *v as f64 * 100.0,
-            SchemeDimension::Auto => 0.0,
+            _ => 0.0,
         }
     }
 }
@@ -233,7 +241,7 @@ impl TextMod {
                 let s = match d {
                     SchemeDimension::Length(l) => *l as f64,
                     SchemeDimension::Percent(p) => rich.root_font_size * (*p as f64),
-                    SchemeDimension::Auto => rich.root_font_size,
+                    _ => rich.root_font_size,
                 };
                 rich.default_font_size = s;
                 rich.root_font_size = s;

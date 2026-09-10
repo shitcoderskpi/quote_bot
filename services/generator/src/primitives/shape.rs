@@ -28,7 +28,8 @@ pub enum ShapeKind {
 }
 
 impl ShapeKind {
-    pub fn to_kurbo(&self, w: f64, h: f64, _viewport: Viewport, _font_size: f64) -> BezPath {
+    pub fn to_kurbo(&self, w: f64, h: f64) -> BezPath {
+        const EPSILON: f64 = 0.1;
         match self {
             ShapeKind::Rect { corners } => {
                 let rect = Rect::new(0.0, 0.0, w, h);
@@ -38,23 +39,23 @@ impl ShapeKind {
                     corners.bottom_right,
                     corners.bottom_left,
                 );
-                RoundedRect::from_rect(rect, radii).to_path(0.1)
+                RoundedRect::from_rect(rect, radii).to_path(EPSILON)
             }
             ShapeKind::Circle => {
                 let r = w.min(h) / 2.0;
-                Circle::new((w / 2.0, h / 2.0), r).to_path(0.1)
+                Circle::new((w / 2.0, h / 2.0), r).to_path(EPSILON)
             }
             ShapeKind::Ellipse => {
-                Ellipse::new((w / 2.0, h / 2.0), (w / 2.0, h / 2.0), 0.0).to_path(0.1)
+                Ellipse::new((w / 2.0, h / 2.0), (w / 2.0, h / 2.0), 0.0).to_path(EPSILON)
             }
             ShapeKind::Path { data } => {
                 if let Ok(path) = BezPath::from_svg(data) {
                     path
                 } else {
-                    Rect::new(0.0, 0.0, w, h).to_path(0.1)
+                    Rect::new(0.0, 0.0, w, h).to_path(EPSILON)
                 }
             }
-            ShapeKind::Clip(inner) => inner.to_kurbo(w, h, _viewport, _font_size),
+            ShapeKind::Clip(inner) => inner.to_kurbo(w, h),
         }
     }
 }
@@ -62,10 +63,6 @@ impl ShapeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn vp() -> Viewport {
-        Viewport { width: 1.0, height: 1.0 }
-    }
 
     fn epsilon() -> f64 {
         0.0001
@@ -99,7 +96,7 @@ mod tests {
     #[test]
     fn rect_zero_corners_bounding_box() {
         let shape = ShapeKind::Rect { corners: Corners::zero() };
-        let path = shape.to_kurbo(100.0, 50.0, vp(), 16.0);
+        let path = shape.to_kurbo(100.0, 50.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 100.0).abs() < epsilon());
         assert!((bb.height() - 50.0).abs() < epsilon());
@@ -108,7 +105,7 @@ mod tests {
     #[test]
     fn rect_rounded_corners_bounding_box() {
         let shape = ShapeKind::Rect { corners: Corners::all(10.0) };
-        let path = shape.to_kurbo(200.0, 80.0, vp(), 16.0);
+        let path = shape.to_kurbo(200.0, 80.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 200.0).abs() < epsilon());
         assert!((bb.height() - 80.0).abs() < epsilon());
@@ -123,7 +120,7 @@ mod tests {
             bottom_left: 0.0,
         };
         let shape = ShapeKind::Rect { corners };
-        let path = shape.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let path = shape.to_kurbo(100.0, 100.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 100.0).abs() < epsilon());
         assert!((bb.height() - 100.0).abs() < epsilon());
@@ -131,7 +128,7 @@ mod tests {
 
     #[test]
     fn circle_square_box() {
-        let path = ShapeKind::Circle.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let path = ShapeKind::Circle.to_kurbo(100.0, 100.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 100.0).abs() < epsilon(), "width={}", bb.width());
         assert!((bb.height() - 100.0).abs() < epsilon(), "height={}", bb.height());
@@ -139,7 +136,7 @@ mod tests {
 
     #[test]
     fn circle_rectangular_box_uses_min_dim() {
-        let path = ShapeKind::Circle.to_kurbo(200.0, 100.0, vp(), 16.0);
+        let path = ShapeKind::Circle.to_kurbo(200.0, 100.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 100.0).abs() < epsilon());
         assert!((bb.height() - 100.0).abs() < epsilon());
@@ -147,7 +144,7 @@ mod tests {
 
     #[test]
     fn ellipse_fills_box() {
-        let path = ShapeKind::Ellipse.to_kurbo(200.0, 100.0, vp(), 16.0);
+        let path = ShapeKind::Ellipse.to_kurbo(200.0, 100.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 200.0).abs() < epsilon());
         assert!((bb.height() - 100.0).abs() < epsilon());
@@ -158,7 +155,7 @@ mod tests {
         let shape = ShapeKind::Path {
             data: "M 0 0 L 80 0 L 80 40 L 0 40 Z".to_string(),
         };
-        let path = shape.to_kurbo(200.0, 200.0, vp(), 16.0);
+        let path = shape.to_kurbo(200.0, 200.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 80.0).abs() < epsilon());
         assert!((bb.height() - 40.0).abs() < epsilon());
@@ -169,7 +166,7 @@ mod tests {
         let shape = ShapeKind::Path {
             data: "not-a-path".to_string(),
         };
-        let path = shape.to_kurbo(100.0, 50.0, vp(), 16.0);
+        let path = shape.to_kurbo(100.0, 50.0);
         let bb = path.bounding_box();
         assert!((bb.width() - 100.0).abs() < epsilon());
         assert!((bb.height() - 50.0).abs() < epsilon());
@@ -179,8 +176,8 @@ mod tests {
     fn clip_delegates_to_inner() {
         let inner = ShapeKind::Circle;
         let clip = ShapeKind::Clip(Box::new(inner.clone()));
-        let direct = inner.to_kurbo(100.0, 100.0, vp(), 16.0);
-        let via_clip = clip.to_kurbo(100.0, 100.0, vp(), 16.0);
+        let direct = inner.to_kurbo(100.0, 100.0);
+        let via_clip = clip.to_kurbo(100.0, 100.0);
         let bb1 = direct.bounding_box();
         let bb2 = via_clip.bounding_box();
         assert!((bb1.width() - bb2.width()).abs() < epsilon());
