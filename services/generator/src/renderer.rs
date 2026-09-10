@@ -13,7 +13,6 @@ pub struct GpuContext {
 
 pub struct RenderContext {
     tx: Sender<SceneTask>,
-    rx: Receiver<SceneTask>,
     handles: Vec<JoinHandle<()>>
 }
 
@@ -69,7 +68,7 @@ impl RenderContext {
             handles.push(handle);
         }
 
-        Ok(Self { tx, rx, handles })
+        Ok(Self { tx, handles })
     }
 
     pub async fn send_render_task(
