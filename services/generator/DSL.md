@@ -21,12 +21,16 @@ Steel Scheme (`.scm`) template files build a **Node tree** using registered Rust
 
 ## Units / Dimensions
 
-| Call      | Description |
-|-----------|-------------|
-| `(px N)`  | Pixels      |
-| `(pt N)`  | Points      |
-| `(pct N)` | Percentage  |
-| `(auto)`  | Auto sizing |
+| Call            | Description                                 |
+|-----------------|---------------------------------------------|
+| `(px N)`        | Pixels                                      |
+| `(pt N)`        | Points                                      |
+| `(pct N)`       | Percentage                                  |
+| `(min-content)` | Minimum intrinsic size                      |
+| `(max-content)` | Maximum intrinsic size                      |
+| `(fit-content)` | The smallest size needed to fit the content |
+| `(stretch)`     | Fits the available size of the container    |
+| `(auto)`        | Auto sizing                                 |
 
 ---
 
