@@ -34,7 +34,7 @@ fn process_job(
 
     let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
 
-    let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport, 16.0);
+    let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport)?;
 
     let width  = measured_w;
     let height = measured_h;

@@ -147,10 +147,10 @@ impl StyleMod {
             StyleMod::Position(p) => style.layout.position = *p,
             StyleMod::Width(d) => style.layout.size.width = d.to_dimension(),
             StyleMod::Height(d) => style.layout.size.height = d.to_dimension(),
-            StyleMod::MaxWidth(d) => style.layout.max_size.width = d.to_dimension(),
-            StyleMod::MaxHeight(d) => style.layout.max_size.height = d.to_dimension(),
-            StyleMod::MinWidth(d) => style.layout.min_size.width = d.to_dimension(),
-            StyleMod::MinHeight(d) => style.layout.min_size.height = d.to_dimension(),
+            StyleMod::MaxWidth(d) => style.layout.max_size.width = d.to_length_percentage_auto(),
+            StyleMod::MaxHeight(d) => style.layout.max_size.height = d.to_length_percentage_auto(),
+            StyleMod::MinWidth(d) => style.layout.min_size.width = d.to_length_percentage_auto(),
+            StyleMod::MinHeight(d) => style.layout.min_size.height = d.to_length_percentage_auto(),
             StyleMod::PaddingUniform(d) => {
                 let p = d.to_length_percentage();
                 style.layout.padding = Rect { top: p, right: p, bottom: p, left: p };
@@ -388,10 +388,10 @@ mod tests {
         StyleMod::MaxHeight(SchemeDimension::Length(300.0)).apply(&mut style);
         StyleMod::MinWidth(SchemeDimension::Length(10.0)).apply(&mut style);
         StyleMod::MinHeight(SchemeDimension::Length(5.0)).apply(&mut style);
-        assert_eq!(style.layout.max_size.width, Dimension::length(500.0));
-        assert_eq!(style.layout.max_size.height, Dimension::length(300.0));
-        assert_eq!(style.layout.min_size.width, Dimension::length(10.0));
-        assert_eq!(style.layout.min_size.height, Dimension::length(5.0));
+        assert_eq!(style.layout.max_size.width, LengthPercentageAuto::length(500.0));
+        assert_eq!(style.layout.max_size.height, LengthPercentageAuto::length(300.0));
+        assert_eq!(style.layout.min_size.width, LengthPercentageAuto::length(10.0));
+        assert_eq!(style.layout.min_size.height, LengthPercentageAuto::length(5.0));
     }
 
     #[test]

@@ -6,6 +6,7 @@ use vello::peniko::{BlendMode, Brush, Fill, ImageBrush};
 use vello::Scene;
 use taffy::prelude::*;
 use parley::layout::{PositionedLayoutItem, Glyph as ParleyGlyph};
+use taffy::TaffyError;
 use vello::Glyph;
 
 pub struct Renderer {
@@ -25,42 +26,61 @@ impl Renderer {
         }
     }
 
-    pub fn compute_layout(&mut self, node: &Node, viewport: Viewport, _font_size: f64) -> (f64, f64) {
+    pub fn compute_layout(&mut self, node: &Node, viewport: Viewport)
+        -> Result<(f64, f64), TaffyError> {
         self.taffy.clear();
         let root_id = self.build_taffy_tree(node, viewport);
         self.root_id = Some(root_id);
         
         let font_cx = &mut self.font_cx;
         let layout_cx = &mut self.layout_cx;
-        
+
         self.taffy.compute_layout_with_measure(
             root_id,
-            Size { width: AvailableSpace::Definite(viewport.width as f32),
-                height: AvailableSpace::Definite(viewport.height as f32) },
-            |known_dims, avail_space, _id, ctx, _tree| {
-                if let Some(Content::Text(rich)) = ctx {
-                    let max_width = known_dims.width.map(|w| w as f64).or_else(|| {
-                        if let AvailableSpace::Definite(w) = avail_space.width {
-                            Some(w as f64)
-                        } else {
-                            None
-                        }
-                    });
-                    
-                    let layout = rich.layout(font_cx, layout_cx, max_width, viewport);
-                    Size { width: layout.width(), height: layout.height() }
-                } else if let Some(Content::Image { image, .. }) = ctx {
-                    let iw = image.image.width as f32;
-                    let ih = image.image.height as f32;
-                    Size { width: iw, height: ih }
-                } else {
-                    Size::ZERO
-                }
+            Size {
+                width: AvailableSpace::Definite(viewport.width as f32),
+                height: AvailableSpace::Definite(viewport.height as f32)
+            },
+            |inputs, _id, ctx, style| {
+                taffy::compute_leaf_layout(
+                    inputs,
+                    style,
+                    |_, _| 0.0,
+                    |known_dims, avail_space| {
+                        Self::measure(viewport, font_cx, layout_cx, ctx, known_dims, avail_space)
+                    }
+                )
             }
-        ).unwrap();
+        )?;
         
-        let layout = self.taffy.layout(root_id).unwrap();
-        (layout.size.width as f64, layout.size.height as f64)
+        let layout = self.taffy.layout(root_id)?;
+        Ok((layout.size.width as f64, layout.size.height as f64))
+    }
+
+    fn measure(viewport: Viewport,
+               font_cx: &mut FontContext,
+               layout_cx: &mut LayoutContext<Brush>,
+               ctx: Option<&mut Content>,
+               known_dims: Size<Option<f32>>,
+               avail_space: Size<AvailableSpace>) -> Size<f32> {
+        if let Some(Content::Text(rich)) = ctx {
+            let max_width = known_dims.width.map(|w| w as f64).or_else(|| {
+                if let AvailableSpace::Definite(w) = avail_space.width {
+                    Some(w as f64)
+                } else {
+                    None
+                }
+            });
+
+            let layout = rich.layout(font_cx, layout_cx, max_width, viewport);
+            Size { width: layout.width(), height: layout.height() }
+        } else if let Some(Content::Image { image, .. }) = ctx {
+            let iw = image.image.width as f32;
+            let ih = image.image.height as f32;
+            Size { width: iw, height: ih }
+        } else {
+            Size::ZERO
+        }
     }
 
     pub fn render(&mut self, scene: &mut Scene, node: &Node, _root_box: KRect, viewport: Viewport) {
@@ -302,7 +322,7 @@ mod tests {
     fn compute_layout_explicit_size() {
         let node = shaped_node(120.0, 80.0);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         assert!((w - 120.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 80.0).abs() < epsilon(), "h = {}", h);
     }
@@ -320,7 +340,7 @@ mod tests {
             ]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&group, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&group, vp()).unwrap();
         assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
@@ -338,7 +358,7 @@ mod tests {
             ]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&group, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&group, vp()).unwrap();
         assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
@@ -354,7 +374,7 @@ mod tests {
             content: Content::Group(vec![inner]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&outer, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&outer, vp()).unwrap();
         assert!((w - 60.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 40.0).abs() < epsilon(), "h = {}", h);
     }
@@ -375,7 +395,7 @@ mod tests {
             content: Content::Group(vec![]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
@@ -385,7 +405,7 @@ mod tests {
         let rt = RichText::plain("Hello World");
         let node = Node::text(rt);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         assert!(w > 0.0, "text width should be > 0, got {}", w);
         assert!(h > 0.0, "text height should be > 0, got {}", h);
     }
@@ -394,7 +414,7 @@ mod tests {
     fn render_does_not_panic_with_valid_tree() {
         let node = shaped_node(100.0, 50.0);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
 
         let mut scene = Scene::new();
         let root_box = KRect::new(0.0, 0.0, w, h);
@@ -414,7 +434,7 @@ mod tests {
             ]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&group, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&group, vp()).unwrap();
         let mut scene = Scene::new();
         let root_box = KRect::new(0.0, 0.0, w, h);
         renderer.render(&mut scene, &group, root_box, vp());
@@ -437,7 +457,7 @@ mod tests {
             },
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
         renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
     }
@@ -453,7 +473,7 @@ mod tests {
             content: Content::Image { image: brush, clip: Some(ShapeKind::Circle) },
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
         renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
     }
@@ -466,7 +486,7 @@ mod tests {
         style.opacity = 0.5;
         let node = make_node(style);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
         renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
     }
@@ -490,7 +510,7 @@ mod tests {
         style.clip = Some(ShapeKind::Circle);
         let node = make_node(style);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
         renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
     }
@@ -503,7 +523,7 @@ mod tests {
             content: Content::Image { image: brush, clip: None },
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp(), 16.0);
+        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
         assert!((w - 120.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 80.0).abs() < epsilon(), "h = {}", h);
     }
