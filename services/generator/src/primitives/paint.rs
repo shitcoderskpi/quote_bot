@@ -1,4 +1,3 @@
-use crate::primitives::Viewport;
 use vello::peniko::{Brush, Color, ColorStop, ColorStops, Extend, Gradient};
 
 #[derive(Debug, Clone)]

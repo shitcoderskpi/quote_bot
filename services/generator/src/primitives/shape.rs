@@ -1,5 +1,4 @@
-use crate::primitives::Viewport;
-use vello::kurbo::{BezPath, Circle, Ellipse, Point, Rect, RoundedRect, RoundedRectRadii, Shape};
+use vello::kurbo::{BezPath, Circle, Ellipse, Rect, RoundedRect, RoundedRectRadii, Shape};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Corners {

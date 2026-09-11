@@ -1,6 +1,6 @@
-use crate::primitives::node::{Content, Node, Style};
+use crate::primitives::node::{Node, Style};
 use crate::primitives::paint::Paint;
-use crate::primitives::shape::{Corners, ShapeKind};
+use crate::primitives::shape::ShapeKind;
 use crate::primitives::text::RichText;
 use steel::rvals::{Custom, FromSteelVal, SteelVal};
 use taffy::prelude::*;
@@ -279,6 +279,13 @@ impl Custom for SchemeStyle {}
 #[derive(Clone, Debug)]
 pub struct SchemeRichText(pub RichText);
 impl Custom for SchemeRichText {}
+
+#[derive(Clone, Debug, Default)]
+pub struct TextContext {
+    pub content: String,
+    pub entities: Vec<serde_json::Value>,
+}
+impl Custom for TextContext {}
 
 #[cfg(test)]
 mod tests {

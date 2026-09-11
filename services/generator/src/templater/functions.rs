@@ -3,16 +3,19 @@ use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
 use crate::primitives::text::{RichText, TextAlign};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as Base64Engine};
-use steel::rvals::{FromSteelVal, SteelVal};
+use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
 use std::sync::Arc;
+use steel::SteelErr;
 use taffy::prelude::*;
 use vello::peniko::ImageBrush;
 use crate::templater::types::TextMod::Weight;
 use super::types::*;
 
 pub fn register_all(engine: &mut Engine) {
+    engine.register_value("text-context", TextContext::default().into_steelval().unwrap());
+    engine.register_value("payload", SteelVal::ListV(Default::default()));
     engine.register_fn("px", fn_px);
     engine.register_fn("pt", fn_pt);
     engine.register_fn("min-content", fn_min_content);
@@ -27,7 +30,6 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("solid", fn_solid);
     engine.register_fn("angle", fn_angle);
     engine.register_fn("stop", fn_stop);
-    engine.register_fn("%make-circle", fn_make_circle);
     engine.register_fn("svg-path", fn_svg_path);
     engine.register_fn("fill", fn_fill);
     engine.register_fn("stroke", fn_stroke);
@@ -90,6 +92,8 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("wrap", fn_wrap);
     engine.register_fn("align", fn_text_align);
     engine.register_fn("string-byte-length", |s: String| s.len());
+    engine.register_fn("%make-circle", fn_make_circle);
+    engine.register_fn("%make-text", fn_make_text);
     engine.register_fn("%make-style", fn_make_style);
     engine.register_fn("%make-node", fn_make_node);
     engine.register_fn("%make-shape", fn_make_shape);
@@ -103,6 +107,12 @@ pub fn register_all(engine: &mut Engine) {
     engine
         .compile_and_run_raw_program(
             r#"
+            (define (text content . mods) (%make-text content mods text-context))
+            (define (get-payload key default-val)
+               (let ((found (assoc key payload)))
+                 (if (and found (not (null? (cdr found))))
+                     (cdr found)
+                     default-val)))
             (define (style . mods) (%make-style mods))
             (define (circle . args) (%make-circle args))
             (define (rect . args) (%make-rect args))
@@ -485,15 +495,17 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
 pub(crate) fn fn_make_text(
     content: SteelVal,
     mods: SteelVal,
-    content_opt: &Option<String>,
-    entities_opt: &Option<Vec<serde_json::Value>>,
-) -> Result<SchemeRichText, String> {
-    let text_str = match &content {
+    ctx: TextContext,
+) -> Result<SchemeRichText, SteelErr> {
+    let text_str = match content {
         SteelVal::StringV(s) => s.to_string(),
-        other => return Err(format!("text: first argument must be a string, got {:?}", other)),
+        other => return Err(SteelErr::new(
+            steel::rerrs::ErrorKind::TypeMismatch,
+            format!("text: first argument must be a string, got {:?}", other)
+        )),
     };
 
-    let mod_list = steel_list_to_vec(&mods)?;
+    let mod_list = steel_list_to_vec(&mods).map_err(|e| SteelErr::new(steel::rerrs::ErrorKind::TypeMismatch, e))?;
     let mut rich = RichText::plain(&text_str);
 
     let mut link_color = vello::peniko::Color::from_rgb8(80, 150, 240);
@@ -502,7 +514,10 @@ pub(crate) fn fn_make_text(
 
     for item in &mod_list {
         let m = TextMod::from_steelval(item)
-            .map_err(|e| format!("text: expected text modifier, got {:?} ({})", item, e))?;
+            .map_err(|e| SteelErr::new(
+                steel::rerrs::ErrorKind::TypeMismatch,
+                format!("text: expected text modifier, got {:?} ({})", item, e)
+            ))?;
             
         if let TextMod::LinkColor(c) = m {
             link_color = c;
@@ -515,37 +530,35 @@ pub(crate) fn fn_make_text(
         m.apply(&mut rich);
     }
     
-    if let (Some(content_str), Some(entities)) = (content_opt, entities_opt) {
-        if let Some(base_offset) = rich.text.find(content_str) {
-            for ent in entities {
-                let t = ent.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                let offset = base_offset + ent.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let length = ent.get("length").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                
-                let mut span = crate::primitives::text::Span::new(offset..(offset + length));
-                match t {
-                    "bold" => span.weight = Some(parley::FontWeight::BOLD),
-                    "italic" => span.italic = Some(true),
-                    "underline" => span.underline = Some(true),
-                    "strikethrough" => span.strikethrough = Some(true),
-                    "code" | "pre" => {
-                        span.font_family = Some(code_family.clone());
-                        if let Some(c) = code_color {
-                            span.color = Some(c);
-                        }
-                    },
-                    "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
-                    "phone_number" | "text_mention" => {
-                        span.color = Some(link_color);
-                        span.underline = Some(true);
-                    },
-                    "bot_command" => {
-                        span.color = Some(link_color);
+    if let Some(base_offset) = rich.text.find(&ctx.content) {
+        for ent in ctx.entities {
+            let t = ent.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let offset = base_offset + ent.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let length = ent.get("length").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            
+            let mut span = crate::primitives::text::Span::new(offset..(offset + length));
+            match t {
+                "bold" => span.weight = Some(parley::FontWeight::BOLD),
+                "italic" => span.italic = Some(true),
+                "underline" => span.underline = Some(true),
+                "strikethrough" => span.strikethrough = Some(true),
+                "code" | "pre" => {
+                    span.font_family = Some(code_family.clone());
+                    if let Some(c) = code_color {
+                        span.color = Some(c);
                     }
-                    _ => {}
+                },
+                "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
+                "phone_number" | "text_mention" => {
+                    span.color = Some(link_color);
+                    span.underline = Some(true);
+                },
+                "bot_command" => {
+                    span.color = Some(link_color);
                 }
-                rich.spans.push(span);
+                _ => {}
             }
+            rich.spans.push(span);
         }
     }
 
@@ -1417,7 +1430,7 @@ mod tests {
     fn make_text_basic() {
         let content = SteelVal::StringV("hello".into());
         let mods = make_steel_list(vec![]);
-        let result = fn_make_text(content, mods, &None, &None).unwrap();
+        let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
         assert_eq!(result.0.text, "hello");
     }
 
@@ -1425,7 +1438,7 @@ mod tests {
     fn make_text_error_not_string() {
         let content = SteelVal::IntV(42);
         let mods = make_steel_list(vec![]);
-        assert!(fn_make_text(content, mods, &None, &None).is_err());
+        assert!(fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).is_err());
     }
 
     #[test]
@@ -1433,7 +1446,7 @@ mod tests {
         let content = SteelVal::StringV("styled".into());
         let bold = TextMod::Weight(parley::FontWeight::BOLD);
         let mods = make_steel_list(vec![bold.into_steelval().unwrap()]);
-        let result = fn_make_text(content, mods, &None, &None).unwrap();
+        let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
         assert_eq!(result.0.default_weight, parley::FontWeight::BOLD);
     }
 
@@ -1446,7 +1459,11 @@ mod tests {
             lc.into_steelval().unwrap(),
             cf.into_steelval().unwrap(),
         ]);
-        let result = fn_make_text(content, mods, &None, &None).unwrap();
+        let result = fn_make_text(content, mods, 
+                                  TextContext { 
+                                      content: "".to_string(), 
+                                      entities: vec![] })
+            .unwrap();
         assert_eq!(result.0.text, "links");
     }
 
@@ -1467,8 +1484,10 @@ mod tests {
         ];
         let result = fn_make_text(
             content, mods,
-            &Some(text.to_string()),
-            &Some(entities),
+            TextContext {
+                content: text.to_string(),
+                entities,
+            }
         ).unwrap();
         assert!(!result.0.spans.is_empty());
     }

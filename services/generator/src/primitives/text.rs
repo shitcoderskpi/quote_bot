@@ -1,10 +1,9 @@
-use crate::primitives::Viewport;
 use parley::{
-    Alignment, FontContext, FontWeight, GenericFamily, Layout, LayoutContext,
+    Alignment, FontContext, FontWeight, Layout, LayoutContext,
     StyleProperty,
 };
-use vello::peniko::{self, Brush};
 use std::ops::Range;
+use vello::peniko::{self, Brush};
 
 #[derive(Debug, Clone)]
 pub struct Span {
@@ -256,7 +255,6 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let rt = RichText::plain("Hello, world!");
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0, "width should be > 0, got {}", layout.width());
         assert!(layout.height() > 0.0, "height should be > 0, got {}", layout.height());
@@ -267,7 +265,6 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let rt = RichText::plain("");
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert_eq!(layout.width(), 0.0);
     }
@@ -278,7 +275,6 @@ mod tests {
         let mut layout_cx = LayoutContext::new();
         let long_text = "a ".repeat(200);
         let rt = RichText::plain(long_text);
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(100.0));
         assert!(layout.width() <= 101.0, "width {} should be <= 100", layout.width());
     }
@@ -291,7 +287,6 @@ mod tests {
         span.weight = Some(FontWeight::BOLD);
         span.font_size = Some(32.0);
         let rt = RichText::plain("Hello World").with_span(span);
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
         assert!(layout.height() > 0.0);
@@ -303,7 +298,6 @@ mod tests {
         let mut layout_cx = LayoutContext::new();
         let mut rt = RichText::plain("italic text");
         rt.default_italic = true;
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -314,7 +308,6 @@ mod tests {
         let mut layout_cx = LayoutContext::new();
         let mut rt = RichText::plain("underlined");
         rt.default_underline = true;
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -325,7 +318,6 @@ mod tests {
         let mut layout_cx = LayoutContext::new();
         let mut rt = RichText::plain("struck");
         rt.default_strikethrough = true;
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -336,7 +328,6 @@ mod tests {
         let mut layout_cx = LayoutContext::new();
         let mut rt = RichText::plain("line height");
         rt.default_line_height = Some(2.0);
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.height() > 0.0);
     }
@@ -355,7 +346,6 @@ mod tests {
         span.color = Some(peniko::Color::WHITE);
         span.line_height = Some(1.5);
         let rt = RichText::plain("Hello World").with_span(span);
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -367,7 +357,6 @@ mod tests {
         let mut span = Span::new(0..5);
         span.italic = Some(false);
         let rt = RichText::plain("Hello World").with_span(span);
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -377,7 +366,6 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let rt = RichText::plain("unconstrained");
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         let layout = rt.layout(&mut font_cx, &mut layout_cx, None);
         assert!(layout.width() > 0.0);
     }
@@ -386,7 +374,6 @@ mod tests {
     fn layout_all_alignments() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let viewport = Viewport { width: 1.0, height: 1.0 };
         for align in [TextAlign::Start, TextAlign::Center, TextAlign::End, TextAlign::Justify] {
             let mut rt = RichText::plain("aligned");
             rt.align = align;

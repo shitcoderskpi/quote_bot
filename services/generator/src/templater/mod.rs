@@ -1,11 +1,14 @@
 mod types;
 mod functions;
 
+use steel::compiler::program::Executable;
 use crate::primitives::node::Node;
+use steel::SteelErr;
+use steel::rvals::IntoSteelVal;
 use steel::rvals::{FromSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
-use steel::steel_vm::register_fn::RegisterFn;
 pub use types::SchemeNode;
+use types::TextContext;
 
 pub struct Templater {
     engine: Engine,
@@ -18,12 +21,23 @@ impl Templater {
         Self { engine }
     }
 
+    pub fn compile_str(&mut self, template_src: &'static str) -> Result<Executable, SteelErr> {
+        let program = self.engine.emit_raw_program_no_path(template_src)?;
+        let executable = self.engine.raw_program_to_executable(program)?;
+        Ok(executable)
+    }
+    pub fn compile(&mut self, template_src: String) -> Result<Executable, SteelErr> {
+        let program = self.engine.emit_raw_program_no_path(template_src)?;
+        let executable = self.engine.raw_program_to_executable(program)?;
+        Ok(executable)
+    }
+
     pub fn render_template(
         &mut self,
-        template_src: &str,
+        template: &Executable,
         payload_json: &str,
-        content_opt: Option<String>,
-        entities_opt: Option<Vec<serde_json::Value>>,
+        content: String,
+        entities: Vec<serde_json::Value>,
     ) -> Result<Node, Box<dyn std::error::Error>> {
         let mut payload_val: serde_json::Value = serde_json::from_str(payload_json)?;
 
@@ -38,43 +52,58 @@ impl Templater {
             obj.insert("avatar_initials".to_string(), serde_json::Value::String(initials));
             
             let grad_id = obj.get("grad_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let colors = match grad_id % 7 {
-                0 => ("#FF516A", "#FF885E"), // Red
-                1 => ("#FFA85C", "#FFCD6A"), // Orange
-                2 => ("#8C79F2", "#B37DF2"), // Purple
-                3 => ("#51BB3F", "#8AE451"), // Green
-                4 => ("#34C6CD", "#4CE9C2"), // Cyan
-                5 => ("#549CFF", "#3CB9FE"), // Blue
-                _ => ("#F2799B", "#F27DF2"), // Pink
-            };
+            let colors = Self::grad_colors(grad_id);
             obj.insert("avatar_color_top".to_string(), serde_json::Value::String(colors.0.to_string()));
             obj.insert("avatar_color_bottom".to_string(), serde_json::Value::String(colors.1.to_string()));
         }
         
         let assoc_str = json_to_scheme(&payload_val);
-        
-        self.engine.register_fn("%make-text", move |content: SteelVal, mods: SteelVal| {
-            functions::fn_make_text(content, mods, &content_opt, &entities_opt)
-        });
+        let payload_steel_val = self.engine.compile_and_run_raw_program(assoc_str)?
+            .into_iter()
+            .last()
+            .unwrap_or(SteelVal::Void);
+            
+        let ctx = TextContext {
+            content,
+            entities,
+        };
 
-        let script = format!(
-            "(define payload {})\n\
-             (define (get-payload key default-val)\n\
-               (let ((found (assoc key payload)))\n\
-                 (if (and found (not (null? (cdr found))))\n\
-                     (cdr found)\n\
-                     default-val)))\n\
-             (define (text content . mods) (%make-text content mods))\n\
-             {}",
-            assoc_str, template_src
-        );
+        self.engine.register_value("%payload", payload_steel_val);
+        self.engine.register_value("%text-context", ctx.into_steelval()?);
+        self.engine.compile_and_run_raw_program(
+            "(set! payload %payload) (set! text-context %text-context)"
+                .to_string()
+        )?;
 
-        let res = self.engine.compile_and_run_raw_program(script)?;
+        let res = self.engine.run_executable(template)?;
         let last_val = res
             .last()
             .ok_or("Template returned no value")?;
 
         extract_node(last_val)
+    }
+
+    fn compile_and_render_template(&mut self,
+                                   template: &'static str,
+                                   payload_json: &str,
+                                   content: String,
+                                   entities: Vec<serde_json::Value>,
+    ) -> Result<Node, Box<dyn std::error::Error>> {
+        let executable = self.compile_str(template)?;
+        self.render_template(&executable, payload_json, content, entities)
+
+    }
+
+    fn grad_colors(grad_id: u64) -> (&'static str, &'static str) {
+        match grad_id % 7 {
+            0 => ("#FF516A", "#FF885E"), // Red
+            1 => ("#FFA85C", "#FFCD6A"), // Orange
+            2 => ("#8C79F2", "#B37DF2"), // Purple
+            3 => ("#51BB3F", "#8AE451"), // Green
+            4 => ("#34C6CD", "#4CE9C2"), // Cyan
+            5 => ("#549CFF", "#3CB9FE"), // Blue
+            _ => ("#F2799B", "#F27DF2"), // Pink
+        }
     }
 }
 
@@ -115,7 +144,7 @@ mod tests {
     use super::*;
     use crate::primitives::node::Content;
     use serde_json::json;
-    
+
     fn epsilon() -> f32 {
         0.0001
     }
@@ -192,11 +221,11 @@ mod tests {
     #[test]
     fn render_minimal_node() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             "(node (style (width (px 100)) (height (px 50))))",
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         assert!(matches!(node.content, Content::Group(ref c) if c.is_empty()));
         assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
@@ -206,11 +235,11 @@ mod tests {
     #[test]
     fn render_shape_node() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             "(node (shape (rect) (fill (solid (hex \"#FF0000\")))))",
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_some()));
     }
@@ -218,11 +247,11 @@ mod tests {
     #[test]
     fn render_text_from_payload() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'username "Default")))"#,
             r#"{"username": "Alice"}"#,
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "Alice"),
@@ -233,11 +262,11 @@ mod tests {
     #[test]
     fn render_text_payload_default() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'missing_key "fallback")))"#,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "fallback"),
@@ -248,11 +277,11 @@ mod tests {
     #[test]
     fn render_avatar_initials() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_initials "")))"#,
             r#"{"username": "John Doe"}"#,
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "JD"),
@@ -263,11 +292,11 @@ mod tests {
     #[test]
     fn render_avatar_initials_single_name() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_initials "")))"#,
             r#"{"username": "alice"}"#,
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "A"),
@@ -278,11 +307,11 @@ mod tests {
     #[test]
     fn render_avatar_initials_three_names() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_initials "")))"#,
             r#"{"username": "Foo Bar Baz"}"#,
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "FB"),
@@ -293,11 +322,11 @@ mod tests {
     #[test]
     fn render_avatar_colors_by_grad_id() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_color_top "")))"#,
             r#"{"username": "X", "grad_id": 3}"#,
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "#51BB3F"),
@@ -309,11 +338,11 @@ mod tests {
     fn render_with_entities_bold() {
         let mut t = Templater::new();
         let payload = r#"{"content": "Hello bold world"}"#;
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             payload,
-            Some("Hello bold world".to_string()),
-            Some(vec![json!({"type": "bold", "offset": 6, "length": 4})]),
+            "Hello bold world".to_string(),
+            vec![json!({"type": "bold", "offset": 6, "length": 4})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -329,11 +358,11 @@ mod tests {
     #[test]
     fn render_with_entities_italic() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "hi there"}"#,
-            Some("hi there".to_string()),
-            Some(vec![json!({"type": "italic", "offset": 0, "length": 2})]),
+            "hi there".to_string(),
+            vec![json!({"type": "italic", "offset": 0, "length": 2})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -346,11 +375,11 @@ mod tests {
     #[test]
     fn render_with_entities_link() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "click here"}"#,
-            Some("click here".to_string()),
-            Some(vec![json!({"type": "text_link", "offset": 6, "length": 4})]),
+            "click here".to_string(),
+            vec![json!({"type": "text_link", "offset": 6, "length": 4})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -364,13 +393,13 @@ mod tests {
     #[test]
     fn render_nested_nodes() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (style (flex-column))
                  (node (style (width (px 100)) (height (px 30))))
                  (node (style (width (px 100)) (height (px 30)))))"#,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Group(children) => assert_eq!(children.len(), 2),
@@ -381,13 +410,13 @@ mod tests {
     #[test]
     fn render_with_style_modifiers() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (style (flex-row) (align-center) (justify-between)
                          (padding (px 10)) (gap (px 5))
                          (opacity 0.8) (rotate 45)))"#,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         assert!((node.style.opacity - 0.8).abs() < epsilon());
         assert!((node.style.rotate_deg - 45.0).abs() < epsilon() as f64);
@@ -396,11 +425,11 @@ mod tests {
     #[test]
     fn render_invalid_script_returns_error() {
         let mut t = Templater::new();
-        let result = t.render_template(
+        let result = t.compile_and_render_template(
             "(this is not valid scheme +++",
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         );
         assert!(result.is_err());
     }
@@ -408,13 +437,13 @@ mod tests {
     #[test]
     fn render_with_conditional() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(if #t
                  (node (style (width (px 100)) (height (px 100))))
                  (node (style (width (px 50)) (height (px 50)))))"#,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
         assert_eq!(node.style.layout.size.height, taffy::prelude::Dimension::length(100.0));
@@ -423,11 +452,11 @@ mod tests {
     #[test]
     fn render_with_gradients() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r##"(node (shape (rect) (fill (linear-gradient (hex "#FF0000") (hex "#0000FF")))))"##,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Shape { fill: Some(crate::primitives::paint::Paint::LinearGradient { .. }), .. } => {}
@@ -438,11 +467,11 @@ mod tests {
     #[test]
     fn render_rounded_rect() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r##"(node (shape (rounded-rect (px 10)) (fill (solid (hex "#000000")))))"##,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { .. }));
     }
@@ -450,11 +479,11 @@ mod tests {
     #[test]
     fn render_circle_shape() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r##"(node (shape (circle (px 50)) (fill (solid (hex "#FF0000")))))"##,
             "{}",
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { .. }));
     }
@@ -472,11 +501,11 @@ mod tests {
         ];
         for (grad_id, expected_top) in expected_tops {
             let mut t = Templater::new();
-            let node = t.render_template(
+            let node = t.compile_and_render_template(
                 r#"(node (text (get-payload 'avatar_color_top "")))"#,
                 &format!(r#"{{"username": "X", "grad_id": {}}}"#, grad_id),
-                None,
-                None,
+                "".to_string(),
+                vec![],
             ).unwrap();
             match &node.content {
                 Content::Text(rich) => assert_eq!(rich.text, expected_top, "grad_id={}", grad_id),
@@ -488,11 +517,11 @@ mod tests {
     #[test]
     fn render_avatar_colors_bottom() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_color_bottom "")))"#,
             r#"{"username": "X", "grad_id": 5}"#,
-            None,
-            None,
+            "".to_string(),
+            vec![],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "#3CB9FE"),
@@ -503,11 +532,11 @@ mod tests {
     #[test]
     fn render_with_entities_underline() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "hello"}"#,
-            Some("hello".to_string()),
-            Some(vec![json!({"type": "underline", "offset": 0, "length": 5})]),
+            "hello".to_string(),
+            vec![json!({"type": "underline", "offset": 0, "length": 5})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -520,11 +549,11 @@ mod tests {
     #[test]
     fn render_with_entities_strikethrough() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "hello"}"#,
-            Some("hello".to_string()),
-            Some(vec![json!({"type": "strikethrough", "offset": 0, "length": 5})]),
+            "hello".to_string(),
+            vec![json!({"type": "strikethrough", "offset": 0, "length": 5})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -537,11 +566,11 @@ mod tests {
     #[test]
     fn render_with_entities_code() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "hello"}"#,
-            Some("hello".to_string()),
-            Some(vec![json!({"type": "code", "offset": 0, "length": 5})]),
+            "hello".to_string(),
+            vec![json!({"type": "code", "offset": 0, "length": 5})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -554,11 +583,11 @@ mod tests {
     #[test]
     fn render_with_entities_bot_command() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "/start"}"#,
-            Some("/start".to_string()),
-            Some(vec![json!({"type": "bot_command", "offset": 0, "length": 6})]),
+            "/start".to_string(),
+            vec![json!({"type": "bot_command", "offset": 0, "length": 6})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -572,11 +601,11 @@ mod tests {
     #[test]
     fn render_with_entities_url() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "http://a.com"}"#,
-            Some("http://a.com".to_string()),
-            Some(vec![json!({"type": "url", "offset": 0, "length": 12})]),
+            "http://a.com".to_string(),
+            vec![json!({"type": "url", "offset": 0, "length": 12})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
@@ -590,11 +619,11 @@ mod tests {
     #[test]
     fn render_with_entities_mention() {
         let mut t = Templater::new();
-        let node = t.render_template(
+        let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
             r#"{"content": "@user"}"#,
-            Some("@user".to_string()),
-            Some(vec![json!({"type": "mention", "offset": 0, "length": 5})]),
+            "@user".to_string(),
+            vec![json!({"type": "mention", "offset": 0, "length": 5})],
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
