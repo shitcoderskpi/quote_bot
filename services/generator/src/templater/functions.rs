@@ -84,6 +84,7 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("underline", || TextMod::Underline);
     engine.register_fn("strikethrough", || TextMod::Strikethrough);
     engine.register_fn("link-color", fn_link_color);
+    engine.register_fn("code-color", fn_code_color);
     engine.register_fn("code-family", fn_code_family);
     engine.register_fn("line-height", fn_line_height);
     engine.register_fn("wrap", fn_wrap);
@@ -427,6 +428,8 @@ fn fn_family(s: String) -> TextMod { TextMod::Family(s) }
 fn fn_weight(v: SchemeNumber) -> TextMod { Weight(parley::FontWeight::new(v.0 as f32)) }
 fn fn_italic() -> TextMod { TextMod::Italic }
 fn fn_link_color(c: SchemeColor) -> TextMod { TextMod::LinkColor(c.0) }
+
+fn fn_code_color(c: SchemeColor) -> TextMod {TextMod::CodeColor(c.0) }
 fn fn_code_family(s: String) -> TextMod { TextMod::CodeFamily(s) }
 fn fn_line_height(v: SchemeNumber) -> TextMod { TextMod::LineHeight(v.0 as f32) }
 fn fn_wrap(b: bool) -> TextMod { TextMod::Wrap(b) }
@@ -495,6 +498,7 @@ pub(crate) fn fn_make_text(
 
     let mut link_color = vello::peniko::Color::from_rgb8(80, 150, 240);
     let mut code_family = "monospace".to_string();
+    let mut code_color = None;
 
     for item in &mod_list {
         let m = TextMod::from_steelval(item)
@@ -504,6 +508,8 @@ pub(crate) fn fn_make_text(
             link_color = c;
         } else if let TextMod::CodeFamily(f) = &m {
             code_family = f.clone();
+        } else if let TextMod::CodeColor(c) = m {
+            code_color = Some(c);
         }
         
         m.apply(&mut rich);
@@ -522,7 +528,12 @@ pub(crate) fn fn_make_text(
                     "italic" => span.italic = Some(true),
                     "underline" => span.underline = Some(true),
                     "strikethrough" => span.strikethrough = Some(true),
-                    "code" | "pre" => span.font_family = Some(code_family.clone()),
+                    "code" | "pre" => {
+                        span.font_family = Some(code_family.clone());
+                        if let Some(c) = code_color {
+                            span.color = Some(c);
+                        }
+                    },
                     "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
                     "phone_number" | "text_mention" => {
                         span.color = Some(link_color);

@@ -48,7 +48,7 @@ impl RenderContext {
                 ..Default::default()
             }).await?;
 
-            let mut renderer = Renderer::new(
+            let renderer = Renderer::new(
                 &device,
                 RendererOptions {
                     use_cpu: false,
@@ -106,7 +106,7 @@ impl RenderContext {
             };
 
             if let Err(e) = ctx.renderer
-                .render_to_texture(&ctx.device, &ctx.queue, &task.scene, &view, &params){
+                .render_to_texture(&ctx.device, &ctx.queue, &task.scene, &view, &params) {
                 task.tx.send(Err(format!("Failed to render scene to a texture: {}", e))).ok();
                 continue;
             }
@@ -158,7 +158,7 @@ impl RenderContext {
                 continue;
             }
 
-            if let Err(e) = rx_gpu.recv(){
+            if let Err(e) = rx_gpu.recv() {
                 task.tx.send(Err(format!("Failed to send task to a GPU: {}", e))).ok();
                 continue;
             }

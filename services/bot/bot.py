@@ -99,6 +99,13 @@ def convert_entities(text: str, entities) -> list:
             "pre",
             "text_link",
             "url",
+            "mention",
+            "bot_command",
+            "hashtag",
+            "cashtag",
+            "email",
+            "phone_number",
+            "text_mention",
         ):
             continue
 
@@ -215,4 +222,3 @@ async def bot_() -> None:
 if __name__ == "__main__":
     logger.warning("Run bot through main.py.")
     run(bot_())
-

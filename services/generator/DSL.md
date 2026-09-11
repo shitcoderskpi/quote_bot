@@ -137,6 +137,7 @@ Creates a text node. First arg is the string content; remaining args are text mo
 | `(underline)`     | Adds an underline                                 |
 | `(strikethrough)` | Adds a strikethrough                              |
 | `(link-color C)`  | Sets color for links                              |
+| `(code-color C)`  | Sets font family for inline code                  |
 | `(code-family S)` | Sets font family for inline code                  |
 | `(line-height N)` | Sets relative line height                         |
 | `(wrap BOOL)`     | Sets whether text should wrap (`#t` or `#f`)      |

@@ -228,6 +228,7 @@ pub enum TextMod {
     LineHeight(f32),
     Align(crate::primitives::text::TextAlign),
     LinkColor(vello::peniko::Color),
+    CodeColor(vello::peniko::Color),
     CodeFamily(String),
     Wrap(bool),
 }
@@ -255,7 +256,7 @@ impl TextMod {
             TextMod::LineHeight(lh) => rich.default_line_height = Some(*lh),
             TextMod::Align(a) => rich.align = *a,
             TextMod::Wrap(w) => rich.wrap = *w,
-            TextMod::LinkColor(_) | TextMod::CodeFamily(_) => {}
+            TextMod::LinkColor(_) | TextMod::CodeFamily(_) | TextMod::CodeColor(_) => {}
         }
     }
 }

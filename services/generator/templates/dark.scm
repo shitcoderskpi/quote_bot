@@ -23,7 +23,8 @@
 
 (define theme-bg-color (hex "#2A2F33"))
 (define theme-link-color (hex "#4B8FCA"))
-(define theme-code-family "monospace")
+(define theme-code-family "SF Mono")
+(define theme-code-color (hex "#BFD4E7"))
 
 (node (style (flex-row) (align-items 'end)
              (padding (px 2) (px 4) (px 4) (px 1)))
@@ -74,4 +75,5 @@
     (text content
           (size (pt 15)) (color (hex "#D8DFE5")) (family "SF Pro Display")
           (link-color theme-link-color)
+          (code-color theme-code-color)
           (code-family theme-code-family))))
