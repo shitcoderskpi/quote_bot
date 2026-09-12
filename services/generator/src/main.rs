@@ -1,88 +1,138 @@
+use std::collections::HashMap;
+use steel::compiler::program::Executable;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use vello::kurbo::Affine;
+use vello::kurbo::Rect;
 use vello::Scene;
+use crate::renderer::SceneTask;
+use crate::templater::Templater;
 
 mod compressor;
 mod config;
-mod layout;
-mod parser;
 mod redis_queue;
-mod renderer;
 mod templater;
-mod text;
+mod primitives;
+mod renderer;
 
-fn process_job(
+async fn process_job<'a>(
     raw: &str,
     cfg: &config::Config,
+    templater: &mut Templater,
+    themes: &HashMap<String, Executable>,
+    renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
-    font_cx: &mut parley::FontContext,
-    layout_cx: &mut parley::LayoutContext,
-    env: &minijinja::Environment,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    // ── Stage 1: Parse input and produce wire-format message ──
-    let (msg, dpi) = if raw.trim_start().starts_with('{') {
-        // JSON input → template pipeline
-        let input_msg: templater::InputMessage = serde_json::from_str(raw)?;
-        let msg_dpi = input_msg.dpi;
+    buf: &'a mut Vec<u8>,
+) -> Result<&'a mut Vec<u8>, Box<dyn std::error::Error>> {
+    let input_msg: serde_json::Value = serde_json::from_str(raw)?;
+    let dpi = input_msg.get("dpi")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(cfg.dpi);
+    let theme = input_msg.get("theme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("light");
 
-        let theme = input_msg.theme.as_deref().unwrap_or("light");
-        let template_name = if theme == "dark" { "dark.tem" } else { "light.tem" };
-        let template_path = std::path::Path::new(&cfg.templates_dir).join(template_name);
-        let template_str = std::fs::read_to_string(&template_path)?;
+    let executable = themes.get(theme).ok_or_else(|| format!("Template {} not found", theme))?;
 
-        // Parse template once — used for both font lookups and rendering
-        let template = templater::ParsedTemplate::parse(&template_str);
-        let quote_layout = layout::compute_layout(&input_msg, &template, font_cx, layout_cx);
-        let msg = template.build_message(&input_msg, &quote_layout, &env)?;
+    let content = input_msg.get("content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or("".to_string());
+    let entities = input_msg.get("entities")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or(vec![]);
 
-        (msg, msg_dpi)
-    } else {
-        // Raw wire-format input (no template)
-        let msg = parser::parse(raw)?;
-        (msg, None)
-    };
 
-    // ── Stage 2: Build vello scene from SVG ──
-    let mut scene = vello_svg::render(&msg.svg.data)?;
+    let node_tree = templater.render_template(executable, raw, content, entities)?;
 
-    let tree = vello_svg::usvg::Tree::from_str(
-        &msg.svg.data,
-        &vello_svg::usvg::Options::default(),
-    )?;
-    let size = tree.size();
-    let width = size.width().ceil() as u32;
-    let height = size.height().ceil() as u32;
+    let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
 
-    // ── Stage 3: Draw text layers onto scene ──
-    text::draw_text_layers(&mut scene, &msg.texts, font_cx, layout_cx);
+    let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport)?;
 
-    // ── Stage 4: Scale for DPI and rasterize ──
-    let dpi = dpi.unwrap_or(cfg.dpi);
+    let width  = measured_w;
+    let height = measured_h;
+
+    let mut scene = Scene::new();
+    let root_box = Rect::new(0.0, 0.0, width, height);
+
+    renderer.render(&mut scene, &node_tree, root_box, viewport);
+
     let scale = dpi as f64 / 96.0;
+    let scaled_width = (width * scale).ceil() as u32;
+    let scaled_height = (height * scale).ceil() as u32;
+
     let mut scaled_scene = Scene::new();
-    scaled_scene.append(&scene, Some(Affine::scale(scale)));
+    scaled_scene.append(&scene, Some(vello::kurbo::Affine::scale(scale)));
 
-    let scaled_width = (width as f64 * scale).ceil() as u32;
-    let scaled_height = (height as f64 * scale).ceil() as u32;
-
-    let (w, h, pixels) =
-        render_ctx.render_scene_to_pixels(&scaled_scene, scaled_width, scaled_height)?;
+    let (rx, task) = SceneTask::new(scaled_scene, scaled_width, scaled_height);
+    render_ctx.send_render_task(task).await;
+    let (w, h, pixels) = match rx.await {
+        Ok(Ok(data)) => data,
+        Ok(Err(e)) => panic!("{}", e),
+        Err(e) => panic!("GPU worker died before responding: {}", e),
+    };
     info!("Rendered {}x{}", w, h);
 
-    // ── Stage 5: Encode to WebP ──
     let mut webp_data = std::io::Cursor::new(Vec::new());
     let img_buf = image::RgbaImage::from_raw(w, h, pixels)
         .ok_or("Failed to create RgbaImage from raw pixels")?;
     img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
 
-    // ── Stage 6: Build result JSON, compress, return ──
     use base64::prelude::*;
     let b64_img = BASE64_STANDARD.encode(webp_data.into_inner());
-    let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, msg.header, b64_img);
 
-    let compressed = compressor::compress(&json_res, 9)?;
-    Ok(compressed)
+    let header = input_msg.get("header")
+        .map(|h| h.to_string())
+        .unwrap_or_else(|| "{}".to_string());
+
+    let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, header, b64_img);
+
+    buf.resize(compressor::max_compressed_size(json_res.len()), 0);
+
+    let n = compressor::compress(&json_res, 9, buf.as_mut_slice())?;
+    buf.truncate(n);
+
+    Ok(buf)
+}
+
+async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> HashMap<String, Executable> {
+    let mut map = HashMap::new();
+    let mut tasks = Vec::new();
+    
+    if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "scm" {
+                        let name = path.file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string();
+                        tasks.push(tokio::spawn(async move {
+                            let content = tokio::fs::read_to_string(&path)
+                                .await
+                                .unwrap_or_default();
+                            (name, content)
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    
+    for task in tasks {
+        if let Ok((name, content)) = task.await {
+            if let Ok(exec) = templater.compile(content) {
+                map.insert(name, exec);
+            } else {
+                error!("Failed to compile template: {}", name);
+            }
+        }
+    }
+    
+    map
 }
 
 #[tokio::main]
@@ -91,41 +141,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("generator=info".parse()?))
         .init();
 
-    let cfg = match config::Config::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Configuration Error: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
-    let mut queue = match redis_queue::RedisQueue::connect(&cfg).await {
-        Ok(q) => q,
-        Err(e) => {
-            error!("Failed to connect to Redis: {}", e);
-            std::process::exit(1);
-        }
-    };
-
+    let cfg = config::Config::from_env()?;
+    let mut templater = Templater::new();
+    
+    let mut renderer = primitives::Renderer::new();
+    
     let mut render_ctx = renderer::RenderContext::new()
         .await
         .expect("Failed to initialize GPU render context");
 
-    let mut font_cx = parley::FontContext::new();
-    let mut layout_cx = parley::LayoutContext::new();
+    info!("Compiling template schemes...");
+    let themes = read_and_compile_templates(
+        &cfg.templates_dir,
+        &mut templater
+    ).await;
+
+    info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
+    let mut queue = redis_queue::RedisQueue::connect(&cfg).await?;
+    let mut decmpd = String::new();
+    let mut cmpd: Vec<u8> = Vec::new();
 
     loop {
-        let payload = match queue.dequeue(cfg.queue_name.clone(), 0.0).await {
-            Ok(Some(p)) => p,
-            Ok(None) => continue,
+        let payload = match queue.dequeue(&cfg.queue_name, 0.0).await {
+            Ok(p) => p,
             Err(e) => {
-                error!("Error dequeuing job: {}", e);
+                if !e.is_timeout() {
+                    error!("Error getting job: {}", e);
+                    continue;
+                }
                 continue;
             }
         };
 
-        let raw = match compressor::decompress(&payload) {
+        decmpd.clear();
+        match compressor::decompress(&payload, &mut decmpd) {
             Ok(r) => r,
             Err(e) => {
                 error!("Failed to decompress job: {}", e);
@@ -133,8 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let env = minijinja::Environment::new();
-        match process_job(&raw, &cfg, &mut render_ctx, &mut font_cx, &mut layout_cx, &env) {
+        match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd).await {
             Ok(result) => {
                 if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
                     error!("Failed to enqueue result: {}", e);

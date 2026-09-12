@@ -6,14 +6,16 @@ pub enum CompressorError {
     Decompress(#[from] std::io::Error),
 }
 
-pub fn decompress(input: &[u8]) -> Result<String, CompressorError> {
+pub fn decompress(input: &[u8], out: &mut String) -> Result<(), CompressorError> {
     let mut decoder = zstd::Decoder::new(input)?;
-    let mut out = String::new();
-    decoder.read_to_string(&mut out)?;
-    Ok(out)
+    decoder.read_to_string(out)?;
+    Ok(())
 }
 
-pub fn compress(input: &str, level: i32) -> Result<Vec<u8>, CompressorError> {
-    let out = zstd::bulk::compress(input.as_bytes(), level)?;
-    Ok(out)
+pub fn max_compressed_size(src_size: usize) -> usize {
+    zstd::zstd_safe::compress_bound(src_size)
+}
+
+pub fn compress(input: &str, level: i32, out: &mut [u8]) -> std::io::Result<usize> {
+    zstd::bulk::compress_to_buffer(input.as_bytes(), out, level)
 }

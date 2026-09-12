@@ -12,16 +12,16 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        let redis_host = env::var("REDIS_HOST").map_err(|_| "REDIS_HOST environment variable is not set".to_string())?;
+        let redis_host = env::var("REDIS_HOST").unwrap_or("127.0.0.1".to_string());
         
         let redis_port = env::var("REDIS_PORT")
             .ok()
             .and_then(|p| p.parse::<u16>().ok())
             .unwrap_or(6379);
 
-        let queue_name = env::var("QUEUE_NAME").unwrap_or_else(|_| "generate:jobs".to_string());
+        let queue_name = env::var("QUEUE_NAME").unwrap_or("generate:jobs".to_string());
         
-        let results_queue = env::var("RESULTS_QUEUE").unwrap_or_else(|_| "generate:results".to_string());
+        let results_queue = env::var("RESULTS_QUEUE").unwrap_or("generate:results".to_string());
         let templates_dir = env::var("TEMPLATE").map_err(|_| "TEMPLATE environment variable is not set".to_string())?;
         
         let md = std::fs::metadata(&templates_dir)
