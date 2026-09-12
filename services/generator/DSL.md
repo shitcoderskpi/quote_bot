@@ -7,7 +7,7 @@
 
 ## Payload Access
 
-To get access to data that is passed to the 
+To get access to data that is passed to the script use this:
 ```scheme
 (get-payload 'key default value)
 ```
