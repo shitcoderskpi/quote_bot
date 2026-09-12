@@ -1,7 +1,7 @@
 # Template DSL Reference
 
 [Scheme](https://www.scheme.org/) template files build a node tree using registered Rust functions, using
-[Steel](https://github.com/mattwparas/steel) embedded interpreter.The template's last expression must evaluate to a `node`.
+[Steel](https://github.com/mattwparas/steel) embedded interpreter. The template's last expression must evaluate to a `node`.
 
 ---
 
