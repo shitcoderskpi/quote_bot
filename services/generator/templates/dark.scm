@@ -73,7 +73,13 @@
           (node (style (hidden)))))
 
     (text content
-          (size (pt 15)) (color (hex "#D8DFE5")) (family "SF Pro Display")
-          (link-color theme-link-color)
-          (code-color theme-code-color)
-          (code-family theme-code-family))))
+      (size (pt 15))
+      (overflow-wrap 'anywhere)
+      (color (hex "#D8DFE5"))
+      (family "SF Pro Display")
+      (link-color theme-link-color)
+      (code-color theme-code-color)
+      (code-family theme-code-family)
+    )
+  )
+)

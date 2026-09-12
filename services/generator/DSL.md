@@ -1,20 +1,15 @@
 # Template DSL Reference
 
-Steel Scheme (`.scm`) template files build a **Node tree** using registered Rust functions. The template's last expression must evaluate to a `node`.
+[Scheme](https://www.scheme.org/) template files build a node tree using registered Rust functions, using
+[Steel](https://github.com/mattwparas/steel) embedded interpreter.The template's last expression must evaluate to a `node`.
 
 ---
 
 ## Payload Access
 
+To get access to data that is passed to the 
 ```scheme
-(define payload ...)  ;; auto-injected as assoc list from the JSON input
-
-;; Helper — returns value for key, or default if missing
-(define (get-payload key default-val)
-  (let ((found (assoc key payload)))
-    (if (and found (not (null? (cdr found))))
-        (cdr found)
-        default-val)))
+(get-payload 'key default value)
 ```
 
 ---
@@ -127,21 +122,22 @@ Creates a text node. First arg is the string content; remaining args are text mo
 
 #### Text modifiers
 
-| Call              | Description                                       |
-|-------------------|---------------------------------------------------|
-| `(size (unit))`   | Font size                                         |
-| `(color COLOR)`   | Text color                                        |
-| `(family STR)`    | Font family name. `"sans-serif"`, `"Inter"`, etc. |
-| `(weight N)`      | Font weight                                       |
-| `(italic)`        | Sets italic font style                            |
-| `(underline)`     | Adds an underline                                 |
-| `(strikethrough)` | Adds a strikethrough                              |
-| `(link-color C)`  | Sets color for links                              |
-| `(code-color C)`  | Sets font family for inline code                  |
-| `(code-family S)` | Sets font family for inline code                  |
-| `(line-height N)` | Sets relative line height                         |
-| `(wrap BOOL)`     | Sets whether text should wrap (`#t` or `#f`)      |
-| `(align SYM)`     | `'start`, `'center`, `'end`, `'justify`           |
+| Call                  | Description                                       |
+|-----------------------|---------------------------------------------------|
+| `(size (unit))`       | Font size                                         |
+| `(color COLOR)`       | Text color                                        |
+| `(family STR)`        | Font family name. `"sans-serif"`, `"Inter"`, etc. |
+| `(weight N)`          | Font weight                                       |
+| `(italic)`            | Sets italic font style                            |
+| `(underline)`         | Adds an underline                                 |
+| `(strikethrough)`     | Adds a strikethrough                              |
+| `(link-color C)`      | Sets color for links                              |
+| `(code-color C)`      | Sets font family for inline code                  |
+| `(code-family S)`     | Sets font family for inline code                  |
+| `(line-height N)`     | Sets relative line height                         |
+| `(wrap BOOL)`         | Sets whether text should wrap (`#t` or `#f`)      |
+| `(overflow-wrap SYM)` | `'normal`, `'anywhere`, `'break-word`             |
+| `(align SYM)`         | `'start`, `'center`, `'end`, `'justify`           |
 
 ---
 

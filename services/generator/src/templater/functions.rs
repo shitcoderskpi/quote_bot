@@ -90,6 +90,7 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("code-family", fn_code_family);
     engine.register_fn("line-height", fn_line_height);
     engine.register_fn("wrap", fn_wrap);
+    engine.register_fn("overflow-wrap", fn_overflow_wrap);
     engine.register_fn("align", fn_text_align);
     engine.register_fn("string-byte-length", |s: String| s.len());
     engine.register_fn("%make-circle", fn_make_circle);
@@ -104,15 +105,13 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("%make-rect", fn_make_rect);
     engine.register_fn("%make-padding", fn_make_padding);
     engine.register_fn("%make-image", fn_make_image);
-    engine
-        .compile_and_run_raw_program(
+    engine.compile_and_run_raw_program(
             r#"
             (define (text content . mods) (%make-text content mods text-context))
             (define (get-payload key default-val)
-               (let ((found (assoc key payload)))
-                 (if (and found (not (null? (cdr found))))
-                     (cdr found)
-                     default-val)))
+                (let ((found (hash-try-get payload key)))
+                    (if (and found (not (null? found)))
+                        found default-val)))
             (define (style . mods) (%make-style mods))
             (define (circle . args) (%make-circle args))
             (define (rect . args) (%make-rect args))
@@ -454,6 +453,17 @@ fn fn_text_align(val: SteelVal) -> Result<TextMod, String> {
         _ => Err(format!("align: unknown value '{}', expected: start, center, end, justify", s)),
     }
 }
+
+fn fn_overflow_wrap(val: SteelVal) -> Result<TextMod, String> {
+    let s = symbol_str(&val, "overflow-wrap")?;
+    match s.as_str() {
+        "normal" => Ok(TextMod::OverflowWrap(parley::OverflowWrap::Normal)),
+        "anywhere" => Ok(TextMod::OverflowWrap(parley::OverflowWrap::Anywhere)),
+        "break-word" => Ok(TextMod::OverflowWrap(parley::OverflowWrap::BreakWord)),
+        _ => Err(format!("overflow-wrap: unknown value '{}', expected: normal, anywhere, break-word", s)),
+    }
+}
+
 fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, String> {
     let list = steel_list_to_vec(&mods)?;
     let mut style = Style::default();

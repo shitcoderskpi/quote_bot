@@ -48,6 +48,7 @@ pub struct RichText {
     pub spans: Vec<Span>,
     pub align: TextAlign,
     pub wrap: bool,
+    pub overflow_wrap: parley::OverflowWrap,
     pub default_font_size: f64,
     pub default_family: String,
     pub default_color: peniko::Color,
@@ -66,6 +67,7 @@ impl RichText {
             spans: Vec::new(),
             align: TextAlign::Start,
             wrap: true,
+            overflow_wrap: parley::OverflowWrap::Normal,
             default_font_size: 16.0,
             default_family: "sans-serif".to_string(),
             default_color: peniko::Color::BLACK,
@@ -109,6 +111,7 @@ impl RichText {
         if let Some(lh) = self.default_line_height {
             builder.push_default(StyleProperty::LineHeight(parley::style::LineHeight::MetricsRelative(lh)));
         }
+        builder.push_default(StyleProperty::OverflowWrap(self.overflow_wrap));
 
         for span in &self.spans {
             if let Some(fs) = span.font_size {

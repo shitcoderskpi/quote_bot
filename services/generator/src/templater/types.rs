@@ -231,6 +231,7 @@ pub enum TextMod {
     CodeColor(vello::peniko::Color),
     CodeFamily(String),
     Wrap(bool),
+    OverflowWrap(parley::OverflowWrap),
 }
 
 impl Custom for TextMod {}
@@ -256,6 +257,7 @@ impl TextMod {
             TextMod::LineHeight(lh) => rich.default_line_height = Some(*lh),
             TextMod::Align(a) => rich.align = *a,
             TextMod::Wrap(w) => rich.wrap = *w,
+            TextMod::OverflowWrap(ow) => rich.overflow_wrap = *ow,
             TextMod::LinkColor(_) | TextMod::CodeFamily(_) | TextMod::CodeColor(_) => {}
         }
     }

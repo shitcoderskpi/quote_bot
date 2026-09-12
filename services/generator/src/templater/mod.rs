@@ -4,8 +4,10 @@ mod functions;
 use steel::compiler::program::Executable;
 use crate::primitives::node::Node;
 use steel::SteelErr;
+use steel::gc::Gc;
 use steel::rvals::IntoSteelVal;
-use steel::rvals::{FromSteelVal, SteelVal};
+use steel::HashMap;
+use steel::rvals::{FromSteelVal, SteelVal, SteelString};
 use steel::steel_vm::engine::Engine;
 pub use types::SchemeNode;
 use types::TextContext;
@@ -42,38 +44,31 @@ impl Templater {
         let mut payload_val: serde_json::Value = serde_json::from_str(payload_json)?;
 
         if let Some(obj) = payload_val.as_object_mut() {
-            let username = obj.get("username").and_then(|v| v.as_str()).unwrap_or("");
+            let username = obj.get("username")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let initials = username
                 .split_whitespace()
                 .take(2)
                 .filter_map(|s| s.chars().next())
                 .collect::<String>()
                 .to_uppercase();
-            obj.insert("avatar_initials".to_string(), serde_json::Value::String(initials));
+            obj.insert("avatar_initials".to_string(),
+                       serde_json::Value::String(initials));
             
-            let grad_id = obj.get("grad_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let grad_id = obj.get("grad_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             let colors = Self::grad_colors(grad_id);
-            obj.insert("avatar_color_top".to_string(), serde_json::Value::String(colors.0.to_string()));
-            obj.insert("avatar_color_bottom".to_string(), serde_json::Value::String(colors.1.to_string()));
+            obj.insert("avatar_color_top".to_string(),
+                       serde_json::Value::String(colors.0.to_string()));
+            obj.insert("avatar_color_bottom".to_string(),
+                       serde_json::Value::String(colors.1.to_string()));
         }
-        
-        let assoc_str = json_to_scheme(&payload_val);
-        let payload_steel_val = self.engine.compile_and_run_raw_program(assoc_str)?
-            .into_iter()
-            .last()
-            .unwrap_or(SteelVal::Void);
-            
-        let ctx = TextContext {
-            content,
-            entities,
-        };
 
-        self.engine.register_value("%payload", payload_steel_val);
-        self.engine.register_value("%text-context", ctx.into_steelval()?);
-        self.engine.compile_and_run_raw_program(
-            "(set! payload %payload) (set! text-context %text-context)"
-                .to_string()
-        )?;
+        let ctx = TextContext { content, entities, };
+        self.engine.update_value("payload", json_to_steelval(&payload_val));
+        self.engine.update_value("text-context", ctx.into_steelval()?);
 
         let res = self.engine.run_executable(template)?;
         let last_val = res
@@ -113,28 +108,31 @@ fn extract_node(val: &SteelVal) -> Result<Node, Box<dyn std::error::Error>> {
     Ok(scheme_node.0)
 }
 
-fn json_to_scheme(val: &serde_json::Value) -> String {
+pub fn json_to_steelval(val: &serde_json::Value) -> SteelVal {
     match val {
-        serde_json::Value::Null => "'()".to_string(),
-        serde_json::Value::Bool(b) => {
-            if *b {
-                "#t".to_string()
+        serde_json::Value::Null => SteelVal::ListV(Default::default()),
+        serde_json::Value::Bool(b) => SteelVal::BoolV(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                SteelVal::IntV(i as isize)
             } else {
-                "#f".to_string()
+                SteelVal::NumV(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => format!("\"{}\"", s.replace("\\", "\\\\").replace("\"", "\\\"")),
+        serde_json::Value::String(s) => SteelVal::StringV(SteelString::from(s.as_str())),
         serde_json::Value::Array(arr) => {
-            let items: Vec<String> = arr.iter().map(json_to_scheme).collect();
-            format!("(list {})", items.join(" "))
+            SteelVal::ListV(arr.iter().map(json_to_steelval).collect())
         }
         serde_json::Value::Object(obj) => {
-            let items: Vec<String> = obj
+            let map: HashMap<SteelVal, SteelVal> = obj
                 .iter()
-                .map(|(k, v)| format!("(cons '{} {})", k, json_to_scheme(v)))
+                .map(|(k, v)| (
+                    SteelVal::SymbolV(SteelString::from(k.as_str())),
+                    json_to_steelval(v),
+                ))
                 .collect();
-            format!("(list {})", items.join(" "))
+            
+            SteelVal::HashMapV(Gc::new(map).into())
         }
     }
 }
@@ -147,75 +145,6 @@ mod tests {
 
     fn epsilon() -> f32 {
         0.0001
-    }
-
-    #[test]
-    fn json_null() {
-        assert_eq!(json_to_scheme(&json!(null)), "'()");
-    }
-
-    #[test]
-    fn json_bool_true() {
-        assert_eq!(json_to_scheme(&json!(true)), "#t");
-    }
-
-    #[test]
-    fn json_bool_false() {
-        assert_eq!(json_to_scheme(&json!(false)), "#f");
-    }
-
-    #[test]
-    fn json_integer() {
-        assert_eq!(json_to_scheme(&json!(42)), "42");
-    }
-
-    #[test]
-    fn json_float() {
-        let result = json_to_scheme(&json!(3.14));
-        assert!(result.starts_with("3.14"));
-    }
-
-    #[test]
-    fn json_string() {
-        assert_eq!(json_to_scheme(&json!("hello")), "\"hello\"");
-    }
-
-    #[test]
-    fn json_string_with_quotes() {
-        let result = json_to_scheme(&json!("say \"hi\""));
-        assert!(result.contains("\\\""), "should escape quotes: {}", result);
-    }
-
-    #[test]
-    fn json_string_with_backslash() {
-        let result = json_to_scheme(&json!("path\\to"));
-        assert!(result.contains("\\\\"), "should escape backslashes: {}", result);
-    }
-
-    #[test]
-    fn json_array() {
-        let result = json_to_scheme(&json!([1, 2, 3]));
-        assert_eq!(result, "(list 1 2 3)");
-    }
-
-    #[test]
-    fn json_empty_array() {
-        let result = json_to_scheme(&json!([]));
-        assert_eq!(result, "(list )");
-    }
-
-    #[test]
-    fn json_object() {
-        let result = json_to_scheme(&json!({"a": 1}));
-        assert!(result.contains("cons 'a 1"), "got: {}", result);
-    }
-
-    #[test]
-    fn json_nested() {
-        let val = json!({"items": [1, "two"], "flag": true});
-        let result = json_to_scheme(&val);
-        assert!(result.contains("list"), "got: {}", result);
-        assert!(result.contains("#t"), "got: {}", result);
     }
 
     #[test]
