@@ -12,17 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mold \
     && rm -rf /var/lib/apt/lists/*
 
-# Cache dependencies first
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 RUN rm -f target/release/deps/generator*
 
-# Build real source
 COPY src ./src
 RUN cargo build --release
 
-# -------------------------
 FROM debian:bookworm-slim
 WORKDIR /app
 
