@@ -13,6 +13,8 @@ from typing import Optional
 import redis
 import zstandard as zstd
 
+import quote_pb2
+
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 JOBS_QUEUE = "generate:jobs"
@@ -35,22 +37,33 @@ class FakeMessage:
     dpi: Optional[int] = None
     theme: str = "light"
 
-    def to_json_bytes(self) -> bytes:
-        data = {
-            "header": self.header,
-            "grad_id": self.grad_id,
-            "username": self.username,
-            "user_status": self.user_status,
-            "user_role": self.user_role,
-            "content": self.content,
-            "entities": self.entities,
-            "image": None,
-        }
+    def to_protobuf_bytes(self) -> bytes:
+        msg = quote_pb2.SerializableMessage()
+        msg.grad_id = self.grad_id
+        msg.username = self.username
+        if self.user_status is not None:
+            msg.user_status = self.user_status
+        if self.user_role is not None:
+            msg.user_role = self.user_role
+        msg.content = self.content
+        if self.image_bytes is not None:
+            msg.image = self.image_bytes
         if self.dpi is not None:
-            data["dpi"] = self.dpi
+            msg.dpi = self.dpi
         if self.theme != "light":
-            data["theme"] = self.theme
-        return json.dumps(data, ensure_ascii=False).encode("utf-8")
+            msg.theme = self.theme
+            
+        if self.header:
+            msg.message_id = self.header.get("message_id", 0)
+            msg.chat_id = self.header.get("chat", {}).get("id", 0)
+            
+        for ent in self.entities:
+            pb_ent = msg.entities.add()
+            pb_ent.type = ent["type"]
+            pb_ent.offset = ent["offset"]
+            pb_ent.length = ent["length"]
+            
+        return msg.SerializeToString()
 
 
 def make_header(chat_id: int = 123456789, message_id: int = 42) -> dict:
@@ -154,11 +167,11 @@ def run_test(
     print(f"  avatar   : {'yes' if msg.image_bytes else 'no'} ({0} bytes)")
     print(f"  entities : {len(msg.entities)}")
 
-    payload = msg.to_json_bytes()
+    payload = msg.to_protobuf_bytes()
     compressed = compressor.compress(payload)
 
     print(
-        f"\n  {Colors.DIM}Payload   : {len(payload)} bytes JSON -> {len(compressed)} bytes zstd{Colors.RESET}"
+        f"\n  {Colors.DIM}Payload   : {len(payload)} bytes PB -> {len(compressed)} bytes zstd{Colors.RESET}"
     )
     r.delete(RESULTS_QUEUE)
 
@@ -185,34 +198,31 @@ def run_test(
 
     try:
         decompressed = decompressor.decompress(raw_result)
-        result_json = json.loads(decompressed)
+        result_msg = quote_pb2.ResultImage()
+        result_msg.ParseFromString(decompressed)
     except Exception as e:
         print(f"  {Colors.RED}DECOMPRESS/PARSE FAILED: {e}{Colors.RESET}")
         return False
 
-    if "image" not in result_json:
-        print(f"  {Colors.RED}Missing 'image' key in response{Colors.RESET}")
+    if not result_msg.image:
+        print(f"  {Colors.RED}Missing 'image' in response{Colors.RESET}")
         return False
-    try:
-        img_bytes = b64decode(result_json["image"])
-    except Exception as e:
-        print(f"  {Colors.RED}base64 decode failed: {e}{Colors.RESET}")
-        return False
+        
+    img = result_msg.image
 
-    resp_header = result_json.get("header", {})
     if msg.header:
         expected_chat_id = msg.header.get("chat", {}).get("id")
-        actual_chat_id = resp_header.get("chat", {}).get("id")
+        actual_chat_id = result_msg.chat_id
         if expected_chat_id != actual_chat_id:
             print(
                 f"  {Colors.YELLOW}Header chat_id mismatch: expected {expected_chat_id}, got {actual_chat_id}{Colors.RESET}"
             )
 
-    is_webp = img_bytes[:4] == b"RIFF" and img_bytes[8:12] == b"WEBP"
+    is_webp = img[:4] == b"RIFF" and img[8:12] == b"WEBP"
     fmt_str = "WebP" if is_webp else "unknown"
 
-    print(f"  {Colors.DIM}Image     : {len(img_bytes)} bytes ({fmt_str}){Colors.RESET}")
-    print(f"  {Colors.DIM}Header    : {json.dumps(resp_header)}{Colors.RESET}")
+    print(f"  {Colors.DIM}Image     : {len(img)} bytes ({fmt_str}){Colors.RESET}")
+    print(f"  {Colors.DIM}Header    : chat_id={result_msg.chat_id} message_id={result_msg.message_id}{Colors.RESET}")
     print(f"  {Colors.DIM}Roundtrip : {elapsed_ms:.0f} ms{Colors.RESET}")
 
     if not is_webp:
@@ -222,7 +232,7 @@ def run_test(
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{name}.webp")
         with open(out_path, "wb") as f:
-            f.write(img_bytes)
+            f.write(img)
         print(f"  {Colors.DIM}Saved to  : {out_path}{Colors.RESET}")
 
     print(f"  {Colors.GREEN}PASSED{Colors.RESET} ({elapsed_ms:.0f} ms)")

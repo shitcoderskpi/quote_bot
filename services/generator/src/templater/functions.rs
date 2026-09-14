@@ -554,9 +554,9 @@ pub(crate) fn fn_make_text(
     
     if let Some(base_offset) = rich.text.find(&ctx.content) {
         for ent in ctx.entities {
-            let t = ent.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            let offset = base_offset + ent.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let length = ent.get("length").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let t = ent.r#type.as_str();
+            let offset = base_offset + ent.offset as usize;
+            let length = ent.length as usize;
             
             let mut span = crate::primitives::text::Span::new(offset..(offset + length));
             match t {
@@ -1498,14 +1498,14 @@ mod tests {
         let content = SteelVal::StringV(text.into());
         let mods = make_steel_list(vec![]);
         let entities = vec![
-            serde_json::json!({"type": "bold", "offset": 6, "length": 4}),
-            serde_json::json!({"type": "italic", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "underline", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "strikethrough", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "code", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "text_link", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "bot_command", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "unknown_type", "offset": 0, "length": 5}),
+            crate::quote::Entity { r#type: "bold".to_string(), offset: 6, length: 4 },
+            crate::quote::Entity { r#type: "italic".to_string(), offset: 0, length: 5 },
+            crate::quote::Entity { r#type: "underline".to_string(), offset: 0, length: 5 },
+            crate::quote::Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 },
+            crate::quote::Entity { r#type: "code".to_string(), offset: 0, length: 5 },
+            crate::quote::Entity { r#type: "text_link".to_string(), offset: 0, length: 5 },
+            crate::quote::Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
+            crate::quote::Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
         ];
         let result = fn_make_text(
             content, mods,
