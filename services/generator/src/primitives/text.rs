@@ -5,17 +5,27 @@ use parley::{
 use std::ops::Range;
 use vello::peniko::{self, Brush};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpoilerStyle {
+    None,
+    #[default]
+    TgMasked,
+    TgOverlay,
+    Faded,
+}
+
 #[derive(Debug, Clone)]
 pub struct Span {
     pub range: Range<usize>,
     pub font_family: Option<String>,
     pub font_size: Option<f64>,
     pub weight: Option<FontWeight>,
-    pub italic: Option<bool>,
-    pub underline: Option<bool>,
-    pub strikethrough: Option<bool>,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
     pub color: Option<peniko::Color>,
     pub line_height: Option<f32>,
+    pub spoiler: bool,
 }
 
 impl Span {
@@ -25,11 +35,12 @@ impl Span {
             font_family: None,
             font_size: None,
             weight: None,
-            italic: None,
-            underline: None,
-            strikethrough: None,
+            italic: false,
+            underline: false,
+            strikethrough: false,
             color: None,
             line_height: None,
+            spoiler: false,
         }
     }
 }
@@ -58,6 +69,7 @@ pub struct RichText {
     pub default_strikethrough: bool,
     pub default_line_height: Option<f32>,
     pub root_font_size: f64,
+    pub spoiler_style: SpoilerStyle,
 }
 
 impl RichText {
@@ -77,6 +89,7 @@ impl RichText {
             default_strikethrough: false,
             default_line_height: None,
             root_font_size: 16.0,
+            spoiler_style: SpoilerStyle::default(),
         }
     }
 
@@ -120,18 +133,14 @@ impl RichText {
             if let Some(w) = span.weight {
                 builder.push(StyleProperty::FontWeight(w), span.range.clone());
             }
-            if let Some(italic) = span.italic {
-                if italic {
-                    builder.push(StyleProperty::FontStyle(parley::FontStyle::Italic), span.range.clone());
-                } else {
-                    builder.push(StyleProperty::FontStyle(parley::FontStyle::Normal), span.range.clone());
-                }
+            if span.italic {
+                builder.push(StyleProperty::FontStyle(parley::FontStyle::Italic), span.range.clone());
             }
-            if let Some(underline) = span.underline {
-                builder.push(StyleProperty::Underline(underline), span.range.clone());
+            if span.underline {
+                builder.push(StyleProperty::Underline(span.underline), span.range.clone());
             }
-            if let Some(strikethrough) = span.strikethrough {
-                builder.push(StyleProperty::Strikethrough(strikethrough), span.range.clone());
+            if span.strikethrough {
+                builder.push(StyleProperty::Strikethrough(span.strikethrough), span.range.clone());
             }
             if let Some(c) = span.color {
                 builder.push(StyleProperty::Brush(Brush::Solid(c)), span.range.clone());
@@ -144,6 +153,17 @@ impl RichText {
                     StyleProperty::FontFamily(parley::style::FontFamily::named(family)),
                     span.range.clone(),
                 );
+            }
+            if span.spoiler {
+                match self.spoiler_style {
+                    SpoilerStyle::Faded => {
+                        builder.push(StyleProperty::Brush(
+                            Brush::Solid(self.default_color.multiply_alpha(0.3)
+                            )
+                        ), span.range.clone());
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -222,9 +242,9 @@ mod tests {
         assert!(s.font_family.is_none());
         assert!(s.font_size.is_none());
         assert!(s.weight.is_none());
-        assert!(s.italic.is_none());
-        assert!(s.underline.is_none());
-        assert!(s.strikethrough.is_none());
+        assert!(!s.italic);
+        assert!(!s.underline);
+        assert!(!s.strikethrough);
         assert!(s.color.is_none());
         assert!(s.line_height.is_none());
     }
@@ -235,9 +255,9 @@ mod tests {
         s.font_family = Some("monospace".into());
         s.font_size = Some(24.0);
         s.weight = Some(FontWeight::BOLD);
-        s.italic = Some(true);
-        s.underline = Some(true);
-        s.strikethrough = Some(true);
+        s.italic = true;
+        s.underline = true;
+        s.strikethrough = true;
         s.color = Some(peniko::Color::WHITE);
         s.line_height = Some(1.5);
         assert_eq!(s.font_family.as_deref(), Some("monospace"));
@@ -343,9 +363,9 @@ mod tests {
         span.font_family = Some("serif".into());
         span.font_size = Some(20.0);
         span.weight = Some(FontWeight::BOLD);
-        span.italic = Some(true);
-        span.underline = Some(true);
-        span.strikethrough = Some(true);
+        span.italic = true;
+        span.underline = true;
+        span.strikethrough = true;
         span.color = Some(peniko::Color::WHITE);
         span.line_height = Some(1.5);
         let rt = RichText::plain("Hello World").with_span(span);
@@ -357,8 +377,7 @@ mod tests {
     fn layout_with_italic_false_span() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let mut span = Span::new(0..5);
-        span.italic = Some(false);
+        let span = Span::new(0..5);
         let rt = RichText::plain("Hello World").with_span(span);
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);

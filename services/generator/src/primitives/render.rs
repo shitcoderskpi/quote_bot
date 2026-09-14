@@ -1,13 +1,21 @@
-use crate::primitives::node::{Content, Node};
 use crate::primitives::Viewport;
-use parley::{FontContext, LayoutContext};
-use vello::kurbo::{Affine, Rect as KRect, Shape, Stroke as KStroke};
-use vello::peniko::{BlendMode, Brush, Fill, ImageBrush};
-use vello::Scene;
-use taffy::prelude::*;
-use parley::layout::{PositionedLayoutItem, Glyph as ParleyGlyph};
+use crate::primitives::node::{Content, Node};
+use crate::primitives::text::{Span, SpoilerStyle};
+use parley::layout::{Glyph as ParleyGlyph, PositionedLayoutItem};
+use parley::{FontContext, GlyphRun, LayoutContext, Run};
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::iter::Map;
+use std::ops::Range;
 use taffy::TaffyError;
+use taffy::prelude::*;
 use vello::Glyph;
+use vello::Scene;
+use vello::kurbo::{Affine, BezPath, Circle as KCircle, Rect as KRect, Shape, Stroke as KStroke};
+use vello::peniko::{BlendMode, Brush, Color, Fill, ImageBrush};
+use crate::primitives::spoiler::{SpoilerSegment, spoiler_segments};
 
 pub struct Renderer {
     font_cx: FontContext,
@@ -15,6 +23,7 @@ pub struct Renderer {
     taffy: TaffyTree<Content>,
     root_id: Option<NodeId>,
 }
+
 
 impl Renderer {
     pub fn new() -> Self {
@@ -31,7 +40,7 @@ impl Renderer {
         self.taffy.clear();
         let root_id = self.build_taffy_tree(node, viewport);
         self.root_id = Some(root_id);
-        
+
         let font_cx = &mut self.font_cx;
         let layout_cx = &mut self.layout_cx;
 
@@ -52,7 +61,7 @@ impl Renderer {
                 )
             }
         )?;
-        
+
         let layout = self.taffy.layout(root_id)?;
         Ok((layout.size.width as f64, layout.size.height as f64))
     }
@@ -90,7 +99,7 @@ impl Renderer {
 
     fn build_taffy_tree(&mut self, node: &Node, viewport: Viewport) -> NodeId {
         let style = node.style.layout.clone();
-        
+
         match &node.content {
             Content::Group(children) => {
                 let mut child_ids = Vec::with_capacity(children.len());
@@ -113,23 +122,23 @@ impl Renderer {
 
     fn render_taffy_tree(&mut self, scene: &mut Scene, id: NodeId, node: &Node, parent_transform: Affine, viewport: Viewport, font_size: f64) {
         let layout = self.taffy.layout(id).unwrap();
-        
+
         let x = layout.location.x as f64;
         let y = layout.location.y as f64;
         let w = layout.size.width as f64;
         let h = layout.size.height as f64;
-        
+
         let center = Affine::translate((x + w / 2.0, y + h / 2.0));
         let rotate = Affine::rotate(node.style.rotate_deg.to_radians());
         let local = center * rotate * Affine::translate((-w / 2.0, -h / 2.0));
         let transform = parent_transform * local;
-        
+
         let needs_layer = node.style.clip.is_some() || node.style.opacity < 1.0;
         if needs_layer {
             let clip_shape = node.style.clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.1));
             scene.push_layer(Fill::NonZero, BlendMode::default(), node.style.opacity, transform, &clip_shape);
         }
-        
+
         match &node.content {
             Content::Shape { kind, fill, stroke } => {
                 let path = kind.to_kurbo(w, h);
@@ -144,7 +153,7 @@ impl Renderer {
             }
             Content::Text(rich) => {
                 let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w));
-                draw_text_layout(scene, transform, &text_layout);
+                draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style);
             }
             Content::Image { image, clip } => {
                 let clip_shape = clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.01));
@@ -158,7 +167,7 @@ impl Renderer {
                 }
             }
         }
-        
+
         if needs_layer {
             scene.pop_layer();
         }
@@ -176,71 +185,230 @@ fn cover_fit_transform(image: &ImageBrush, box_w: f64, box_h: f64) -> Affine {
     Affine::translate((dx, dy)) * Affine::scale(scale)
 }
 
-fn draw_text_layout(scene: &mut Scene, transform: Affine, layout: &parley::Layout<Brush>) {
+fn draw_text_layout(scene: &mut Scene,
+                    transform: Affine,
+                    layout: &parley::Layout<Brush>,
+                    spans: &[Span],
+                    spoiler_style: SpoilerStyle,
+) {
     for line in layout.lines() {
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
-                let mut x = glyph_run.offset() as f64;
-                let y = glyph_run.baseline() as f64;
                 let run = glyph_run.run();
-                let font = run.font();
-                let font_size = run.font_size();
-                let coords = run.normalized_coords();
+                let text_range = run.text_range();
 
-                scene
-                    .draw_glyphs(font)
-                    .brush(&glyph_run.style().brush)
-                    .hint(true)
-                    .transform(transform)
-                    .font_size(font_size)
-                    .normalized_coords(coords)
-                    .draw(
-                        Fill::NonZero,
-                        glyph_run.glyphs().map(|g: ParleyGlyph| {
-                            let gx = x + g.x as f64;
-                            let gy = y - g.y as f64;
-                            x += g.advance as f64;
-                            Glyph { id: g.id, x: gx as f32, y: gy as f32 }
-                        }),
-                    );
-                    
-                let style = glyph_run.style();
-                let run_width = glyph_run.advance();
-                
-                if style.underline.is_some() {
-                    let underline = style.underline.as_ref().unwrap();
-                    let offset = underline.offset.unwrap_or(run.metrics().underline_offset) as f64;
-                    let size = underline.size.unwrap_or(run.metrics().underline_size) as f64;
-                    let y_pos = y - offset;
-                    let start_x = glyph_run.offset() as f64;
-                    let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0, start_x + run_width as f64, y_pos + size / 2.0);
-                    let brush = &underline.brush;
-                    scene.fill(Fill::NonZero, transform, brush, None, &rect);
-                }
-                
-                if style.strikethrough.is_some() {
-                    let strikethrough = style.strikethrough.as_ref().unwrap();
-                    let offset = strikethrough.offset.unwrap_or(run.metrics().strikethrough_offset) as f64;
-                    let size = strikethrough.size.unwrap_or(run.metrics().strikethrough_size) as f64;
-                    let y_pos = y - offset;
-                    let start_x = glyph_run.offset() as f64;
-                    let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0, start_x + run_width as f64, y_pos + size / 2.0);
-                    let brush = &strikethrough.brush;
-                    scene.fill(Fill::NonZero, transform, brush, None, &rect);
+                let segments = spoiled_spans(&text_range, spans)
+                    .map(|spans_iter| spoiler_segments(&glyph_run, run, spans_iter))
+                    .unwrap_or_default();
+
+                if !segments.is_empty() {
+                    match spoiler_style {
+                        SpoilerStyle::TgMasked =>{
+                            draw_text(scene, transform, &glyph_run, run, &segments);
+                            draw_spoiler_tg(scene, transform, &glyph_run, run, &segments, 1.0);
+                        }
+                        SpoilerStyle::TgOverlay =>{
+                            draw_text(scene, transform, &glyph_run, run, &[]);
+                            draw_spoiler_tg(scene, transform, &glyph_run, run, &segments, 0.7);
+                        }
+                        _ => {
+                            draw_text(scene, transform, &glyph_run, run, &[]);
+                        }
+                    }
+                } else {
+                    draw_text(scene, transform, &glyph_run, run, &[]);
                 }
             }
         }
     }
 }
 
+fn draw_text(scene: &mut Scene,
+             transform: Affine,
+             glyph_run: &GlyphRun<Brush>,
+             run: &Run<Brush>,
+             segments: &[SpoilerSegment],
+) {
+    let mut x = glyph_run.offset() as f64;
+    let y = glyph_run.baseline() as f64;
+    let font = run.font();
+    let font_size = run.font_size();
+    let coords = run.normalized_coords();
+
+    scene.draw_glyphs(font)
+        .brush(&glyph_run.style().brush)
+        .hint(true)
+        .transform(transform)
+        .font_size(font_size)
+        .normalized_coords(coords)
+        .draw(
+            Fill::NonZero,
+            glyph_run.glyphs().filter_map(|g: ParleyGlyph| {
+                let glyph_start_x = x;
+                let advance = g.advance as f64;
+                let mid_x = glyph_start_x + advance / 2.0;
+                let gx = x + g.x as f64;
+                let gy = y - g.y as f64;
+                x += advance;
+
+                if !is_skipped(segments, mid_x){
+                    Some(Glyph { id: g.id, x: gx as f32, y: gy as f32 })
+                } else {
+                    None
+                }
+            }),
+        );
+
+    let style = glyph_run.style();
+    let run_width = glyph_run.advance();
+    let start_x = glyph_run.offset() as f64;
+
+    if let Some(underline) = style.underline.as_ref() {
+        let offset = underline.offset.unwrap_or(run.metrics().underline_offset) as f64;
+        let size = underline.size.unwrap_or(run.metrics().underline_size) as f64;
+        let y_pos = y - offset;
+        let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0,
+                                           start_x + run_width as f64,
+                                           y_pos + size / 2.0
+        );
+        scene.fill(Fill::NonZero, transform, &underline.brush, None, &rect);
+    }
+
+    if let Some(strikethrough) = style.strikethrough.as_ref() {
+        let offset = strikethrough.offset.unwrap_or(run.metrics().strikethrough_offset) as f64;
+        let size = strikethrough.size.unwrap_or(run.metrics().strikethrough_size) as f64;
+        let y_pos = y - offset;
+        let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0,
+                                           start_x + run_width as f64,
+                                           y_pos + size / 2.0
+        );
+        scene.fill(Fill::NonZero, transform, &strikethrough.brush, None, &rect);
+    }
+}
+
+fn is_skipped(segments: &[SpoilerSegment], x: f64) -> bool {
+    segments.iter().any(|s| x >= s.start && x < s.end)
+}
+
+fn draw_spoiler_tg(scene: &mut Scene,
+                   transform: Affine,
+                   glyph_run: &GlyphRun<Brush>,
+                   run: &Run<Brush>,
+                   segments: &[SpoilerSegment],
+                   opacity_mod: f32,
+) {
+    let metrics = run.metrics();
+    let font_size = run.font_size();
+    let baseline_y = (glyph_run.baseline() - metrics.ascent) as f64;
+    let h = (metrics.ascent + metrics.descent) as f64;
+
+    for seg in segments {
+        let w = seg.end - seg.start;
+        emit_spoiler(scene,
+                     transform,
+                     seg.start,
+                     baseline_y,
+                     w, h,
+                     glyph_run,
+                     font_size,
+                     &seg.text_range,
+                     opacity_mod
+        );
+    }
+}
+
+fn spoiled_spans<'a>(
+    text_range: &Range<usize>,
+    spans: &'a [Span],
+) -> Option<impl Iterator<Item = &'a Span>> {
+    let start = text_range.start;
+    let end = text_range.end;
+
+    let mut iter = spans
+        .iter()
+        .filter(move |s| s.spoiler && start < s.range.end && s.range.start < end)
+        .peekable();
+
+    iter.peek().is_some().then_some(iter)
+}
+
+fn emit_spoiler(
+    scene: &mut Scene,
+    transform: Affine,
+    x: f64, y: f64, w: f64, h: f64,
+    glyph_run: &GlyphRun<Brush>,
+    font_size: f32,
+    text_range: &Range<usize>,
+    opacity_mod: f32,
+) {
+    let color = match &glyph_run.style().brush {
+        Brush::Solid(c) => {
+            c.multiply_alpha(opacity_mod)
+        }
+        _ => {
+            let c = Color::BLACK;
+            c.multiply_alpha(opacity_mod)
+        },
+    };
+    let mut hasher = DefaultHasher::new();
+    text_range.start.hash(&mut hasher);
+    text_range.end.hash(&mut hasher);
+    let seed = hasher.finish();
+
+    draw_spoiler_particles(scene, transform, x, y, w, h, color, font_size as f64, seed);
+}
+
+// TODO: Replace with GPU instancing perhaps
+fn draw_spoiler_particles(
+    scene: &mut Scene,
+    transform: Affine,
+    x: f64, y: f64, w: f64, h: f64,
+    color: Color,
+    font_size: f64,
+    seed: u64,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+
+    let mut rng = SmallRng::seed_from_u64(seed);
+    let alphas: [f32; 3] = [0.3, 0.6, 1.0];
+
+    let char_width = font_size * 0.6;
+    let chars_in_run = (w / char_width).max(1.0);
+    let count = (chars_in_run * 30.0).min(500.0) as usize;
+
+    // Particle radius scales with font size:
+    // TG uses ~1.2-1.4dp for ~16sp text
+    let radius = (font_size / 16.0) * 0.7;
+
+    let rgba8 = color.to_rgba8();
+    let (cr, cg, cb, ca) = (rgba8.r, rgba8.g, rgba8.b, rgba8.a);
+
+    let mut tier_paths: [BezPath; 3] = Default::default();
+
+    for _ in 0..count {
+        let px = x + rng.random::<f64>() * w;
+        let py = y + rng.random::<f64>() * h;
+        let tier_idx = rng.random_range(0usize..3);
+        tier_paths[tier_idx].extend(KCircle::new((px, py), radius).path_elements(0.1));
+    }
+
+    for (i, path) in tier_paths.iter().enumerate() {
+        let particle_alpha = (ca as f32 * alphas[i]).round() as u8;
+        let particle_color = Color::from_rgba8(cr, cg, cb, particle_alpha);
+        scene.fill(Fill::NonZero, transform, particle_color, None, path);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::Viewport;
     use crate::primitives::node::{Content, Node, Style};
     use crate::primitives::paint::Paint;
     use crate::primitives::shape::{Corners, ShapeKind};
     use crate::primitives::text::RichText;
-    use crate::primitives::Viewport;
     use std::sync::Arc;
 
     fn vp() -> Viewport {

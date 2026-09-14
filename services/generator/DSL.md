@@ -99,7 +99,7 @@ A `node` with no explicit `style` uses default flex layout.
 ### image
 
 Creates an image node from a base64 encoded string (only!). Optionally specify a clip shape. Clip shape can also 
-accept dimensions, although is not a full shape implementation see [below](#shape)
+accept dimensions.
 
 ```scheme
 (image (get-payload 'image "") (circle))
@@ -138,6 +138,7 @@ Creates a text node. First arg is the string content; remaining args are text mo
 | `(wrap BOOL)`         | Sets whether text should wrap (`#t` or `#f`)      |
 | `(overflow-wrap SYM)` | `'normal`, `'anywhere`, `'break-word`             |
 | `(align SYM)`         | `'start`, `'center`, `'end`, `'justify`           |
+| `(spoiler SYM)`       | `'none`, `'tg-masked`, `'tg-overlay`, `'fade`     |
 
 ---
 

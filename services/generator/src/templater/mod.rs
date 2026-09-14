@@ -1,13 +1,13 @@
 mod types;
 mod functions;
 
-use steel::compiler::program::Executable;
 use crate::primitives::node::Node;
+use steel::HashMap;
 use steel::SteelErr;
+use steel::compiler::program::Executable;
 use steel::gc::Gc;
 use steel::rvals::IntoSteelVal;
-use steel::HashMap;
-use steel::rvals::{FromSteelVal, SteelVal, SteelString};
+use steel::rvals::{FromSteelVal, SteelString, SteelVal};
 use steel::steel_vm::engine::Engine;
 pub use types::SchemeNode;
 use types::TextContext;
@@ -295,7 +295,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert_eq!(rich.spans[0].italic, Some(true));
+                assert_eq!(rich.spans[0].italic, true);
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -312,7 +312,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert_eq!(rich.spans[0].underline, Some(true));
+                assert_eq!(rich.spans[0].underline, true);
                 assert!(rich.spans[0].color.is_some());
             }
             other => panic!("Expected Text, got {:?}", other),
@@ -469,7 +469,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert_eq!(rich.spans[0].underline, Some(true));
+                assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -486,7 +486,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert_eq!(rich.spans[0].strikethrough, Some(true));
+                assert_eq!(rich.spans[0].strikethrough, true);
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -521,7 +521,7 @@ mod tests {
         match &node.content {
             Content::Text(rich) => {
                 assert!(rich.spans[0].color.is_some());
-                assert!(rich.spans[0].underline.is_none());
+                assert!(!rich.spans[0].underline);
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -539,7 +539,7 @@ mod tests {
         match &node.content {
             Content::Text(rich) => {
                 assert!(rich.spans[0].color.is_some());
-                assert_eq!(rich.spans[0].underline, Some(true));
+                assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -557,7 +557,7 @@ mod tests {
         match &node.content {
             Content::Text(rich) => {
                 assert!(rich.spans[0].color.is_some());
-                assert_eq!(rich.spans[0].underline, Some(true));
+                assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),
         }

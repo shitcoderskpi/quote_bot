@@ -3,6 +3,7 @@ pub mod paint;
 pub mod render;
 pub mod shape;
 pub mod text;
+pub mod spoiler;
 
 pub use render::Renderer;
 

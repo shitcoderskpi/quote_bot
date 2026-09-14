@@ -1,7 +1,7 @@
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
-use crate::primitives::text::{RichText, TextAlign};
+use crate::primitives::text::{RichText, SpoilerStyle, TextAlign};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as Base64Engine};
 use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
@@ -85,6 +85,7 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("italic", fn_italic);
     engine.register_fn("underline", || TextMod::Underline);
     engine.register_fn("strikethrough", || TextMod::Strikethrough);
+    engine.register_fn("spoiler", fn_spoiler);
     engine.register_fn("link-color", fn_link_color);
     engine.register_fn("code-color", fn_code_color);
     engine.register_fn("code-family", fn_code_family);
@@ -464,6 +465,17 @@ fn fn_overflow_wrap(val: SteelVal) -> Result<TextMod, String> {
     }
 }
 
+fn fn_spoiler(val: SteelVal) -> Result<TextMod, String> {
+    let s = symbol_str(&val, "spoiler")?;
+    match s.as_str() {
+        "none" => Ok(TextMod::SpoilerStyle(SpoilerStyle::None)),
+        "tg-masked" => Ok(TextMod::SpoilerStyle(SpoilerStyle::TgMasked)),
+        "tg-overlay" => Ok(TextMod::SpoilerStyle(SpoilerStyle::TgOverlay)),
+        "faded" => Ok(TextMod::SpoilerStyle(SpoilerStyle::Faded)),
+        _ => Err(format!("spoiler: unknown style '{}', expected: tg-masked, tg-overlay, transparent", s)),
+    }
+}
+
 fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, String> {
     let list = steel_list_to_vec(&mods)?;
     let mut style = Style::default();
@@ -549,9 +561,9 @@ pub(crate) fn fn_make_text(
             let mut span = crate::primitives::text::Span::new(offset..(offset + length));
             match t {
                 "bold" => span.weight = Some(parley::FontWeight::BOLD),
-                "italic" => span.italic = Some(true),
-                "underline" => span.underline = Some(true),
-                "strikethrough" => span.strikethrough = Some(true),
+                "italic" => span.italic = true,
+                "underline" => span.underline = true,
+                "strikethrough" => span.strikethrough = true,
                 "code" | "pre" => {
                     span.font_family = Some(code_family.clone());
                     if let Some(c) = code_color {
@@ -561,10 +573,13 @@ pub(crate) fn fn_make_text(
                 "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
                 "phone_number" | "text_mention" => {
                     span.color = Some(link_color);
-                    span.underline = Some(true);
+                    span.underline = true;
                 },
                 "bot_command" => {
                     span.color = Some(link_color);
+                }
+                "spoiler" => {
+                    span.spoiler = true;
                 }
                 _ => {}
             }

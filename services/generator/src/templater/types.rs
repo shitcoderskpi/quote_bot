@@ -1,7 +1,7 @@
 use crate::primitives::node::{Node, Style};
 use crate::primitives::paint::Paint;
 use crate::primitives::shape::ShapeKind;
-use crate::primitives::text::RichText;
+use crate::primitives::text::{RichText, SpoilerStyle};
 use steel::rvals::{Custom, FromSteelVal, SteelVal};
 use taffy::prelude::*;
 
@@ -232,6 +232,7 @@ pub enum TextMod {
     CodeFamily(String),
     Wrap(bool),
     OverflowWrap(parley::OverflowWrap),
+    SpoilerStyle(SpoilerStyle),
 }
 
 impl Custom for TextMod {}
@@ -258,6 +259,7 @@ impl TextMod {
             TextMod::Align(a) => rich.align = *a,
             TextMod::Wrap(w) => rich.wrap = *w,
             TextMod::OverflowWrap(ow) => rich.overflow_wrap = *ow,
+            TextMod::SpoilerStyle(s) => rich.spoiler_style = *s,
             TextMod::LinkColor(_) | TextMod::CodeFamily(_) | TextMod::CodeColor(_) => {}
         }
     }

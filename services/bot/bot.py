@@ -106,6 +106,7 @@ def convert_entities(text: str, entities) -> list:
             "email",
             "phone_number",
             "text_mention",
+            "spoiler",
         ):
             continue
 

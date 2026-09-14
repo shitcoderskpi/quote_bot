@@ -41,6 +41,8 @@ services:
       - DPI
     devices:
       - /dev/dri:/dev/dri
+    volumes:
+      - ../services/generator/templates:/app/templates
     restart: unless-stopped
 
 
