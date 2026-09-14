@@ -1,8 +1,8 @@
 use parley::*;
+use vello_svg::vello;
 use vello::kurbo::Affine;
 use vello::peniko::{self, Fill};
-use vello::Scene;
-
+use vello_svg::vello::Scene;
 use crate::parser::{Alignment, TextMessage};
 
 fn parse_hex_color(s: &str) -> [u8; 4] {
