@@ -20,8 +20,15 @@ taffy = "0.14.0"
 async-channel = "2.5.0"
 rand = "0.10.2"
 
+[profile.dev]
+opt-level = 0
+panic = "abort"
+split-debuginfo = "unpacked"
+
+[profile.dev.build-override]
+opt-level = 3
+
 [profile.release]
 strip = true
 lto = true
-codegen-units = 1
-
+codegen-units = 16
