@@ -71,7 +71,7 @@ func startHandler(b *gotgbot.Bot, ctx *ext.Context) error {
 	return err
 }
 
-func quoteHandler(redisQueue *RedisQueue) func(b *gotgbot.Bot, ctx *ext.Context) error {
+func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 	return func(b *gotgbot.Bot, ctx *ext.Context) error {
 		msg := ctx.EffectiveMessage
 		var dpi *int
@@ -189,13 +189,13 @@ func quoteHandler(redisQueue *RedisQueue) func(b *gotgbot.Bot, ctx *ext.Context)
 		startMs := time.Now().UnixMilli()
 		ctxBg := context.Background()
 
-		err = redisQueue.Enqueue(ctxBg, "generate:jobs", compressedData)
+		err = queue.Enqueue(ctxBg, "generate:jobs", compressedData)
 		if err != nil {
 			log.Printf("Failed to enqueue job: %v", err)
 			return err
 		}
 
-		resultData, err := redisQueue.Dequeue(ctxBg, "generate:results", 0)
+		resultData, err := queue.Dequeue(ctxBg, "generate:results", 0)
 		if err != nil {
 			log.Printf("Failed to dequeue result: %v", err)
 			return err
