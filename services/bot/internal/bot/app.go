@@ -1,4 +1,4 @@
-package main
+package bot
 
 import (
 	"log"
@@ -62,7 +62,7 @@ func waitForShutdown(updater *ext.Updater) {
 	log.Println("Bot stopped")
 }
 
-func main() {
+func Run() {
 	config := LoadConfig()
 
 	logFile := setupLogging(config.LogPath)
