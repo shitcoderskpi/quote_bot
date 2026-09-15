@@ -1,6 +1,6 @@
 package main
 
-import "bot/internal/bot"
+import "bot/internal"
 
 func main() {
 	bot.Run()
