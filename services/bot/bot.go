@@ -138,12 +138,7 @@ func quoteHandler(redisQueue *RedisQueue) func(b *gotgbot.Bot, ctx *ext.Context)
 			if err == nil {
 				resp, err := http.Get(file.URL(b, nil))
 				if err == nil {
-					defer func(Body io.ReadCloser) {
-						err := Body.Close()
-						if err != nil {
-							log.Panicf("Failed to close response body: %v", err)
-						}
-					}(resp.Body)
+					defer resp.Body.Close()
 					_, err := io.Copy(&avatar, resp.Body)
 					if err != nil {
 						return err
