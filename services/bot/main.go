@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -81,10 +80,6 @@ func main() {
 			log.Printf("Failed to close Redis queue: %v", err)
 		}
 	}()
-
-	ctx := context.Background()
-	_ = redisQueue.Delete(ctx, "generate:jobs")
-	_ = redisQueue.Delete(ctx, "generate:results")
 
 	b, err := gotgbot.NewBot(config.BotToken, nil)
 	if err != nil {
