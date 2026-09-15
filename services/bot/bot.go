@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
+	"unicode/utf8"
 
-	pb "bot/proto"
+	"bot/pb"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -21,56 +21,55 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var supportedEntityTypes = map[string]bool{
+	"bold":          true,
+	"italic":        true,
+	"underline":     true,
+	"strikethrough": true,
+	"code":          true,
+	"pre":           true,
+	"text_link":     true,
+	"url":           true,
+	"mention":       true,
+	"bot_command":   true,
+	"hashtag":       true,
+	"cashtag":       true,
+	"email":         true,
+	"phone_number":  true,
+	"text_mention":  true,
+	"spoiler":       true,
+}
+
 func convertEntities(text string, entities []gotgbot.MessageEntity) []*pb.Entity {
 	if len(entities) == 0 {
 		return nil
 	}
-	var result []*pb.Entity
-	utf16Text := utf16.Encode([]rune(text))
 
+	u16ToByte := []int{0}
+	for i, r := range text {
+		next := i + utf8.RuneLen(r)
+		u16ToByte = append(u16ToByte, next)
+		if r > 0xffff {
+			u16ToByte = append(u16ToByte, next)
+		}
+	}
+
+	result := make([]*pb.Entity, 0, len(entities))
 	for _, ent := range entities {
-		valid := false
-		switch ent.Type {
-		case "bold",
-			"italic",
-			"underline",
-			"strikethrough",
-			"code",
-			"pre",
-			"text_link",
-			"url",
-			"mention",
-			"bot_command",
-			"hashtag",
-			"cashtag",
-			"email",
-			"phone_number",
-			"text_mention",
-			"spoiler":
-			valid = true
-		}
-		if !valid {
+		if !supportedEntityTypes[ent.Type] {
 			continue
 		}
 
-		if int(ent.Offset) > len(utf16Text) {
+		start := int(ent.Offset)
+		if start >= len(u16ToByte) {
 			continue
 		}
-		end := min(int(ent.Offset+ent.Length), len(utf16Text))
-
-		prefix := utf16Text[:ent.Offset]
-		entity := utf16Text[ent.Offset:end]
-
-		prefixStr := string(utf16.Decode(prefix))
-		entityStr := string(utf16.Decode(entity))
-
-		byteOffset := len(prefixStr)
-		byteLength := len(entityStr)
+		end := min(start+int(ent.Length), len(u16ToByte)-1)
 
 		result = append(result, &pb.Entity{
 			Type:   ent.Type,
-			Offset: int32(byteOffset),
-			Length: int32(byteLength),
+			Offset: int32(u16ToByte[start]),
+			Length: int32(u16ToByte[end] - u16ToByte[start]),
 		})
 	}
 	return result
