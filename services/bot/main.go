@@ -74,9 +74,9 @@ func main() {
 		}()
 	}
 
-	redisQueue := NewRedisQueue(config.RedisHost)
+	var queue Queue = NewRedisQueue(config.RedisHost)
 	defer func() {
-		if err := redisQueue.Close(); err != nil {
+		if err := queue.Close(); err != nil {
 			log.Printf("Failed to close Redis queue: %v", err)
 		}
 	}()
@@ -86,7 +86,7 @@ func main() {
 		log.Fatalf("failed to create bot: %v", err)
 	}
 
-	updater := ext.NewUpdater(newDispatcher(redisQueue), nil)
+	updater := ext.NewUpdater(newDispatcher(queue), nil)
 	if err := updater.StartPolling(b, &ext.PollingOpts{
 		DropPendingUpdates: true,
 		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{

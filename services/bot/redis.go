@@ -11,6 +11,7 @@ import (
 type Queue interface {
 	Enqueue(ctx context.Context, name string, data []byte) error
 	Dequeue(ctx context.Context, name string, timeout time.Duration) ([]byte, error)
+	Close() error
 }
 
 type RedisQueue struct {
