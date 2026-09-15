@@ -1,8 +1,10 @@
 mod types;
 mod functions;
+pub mod image;
 
 use crate::primitives::node::Node;
 use crate::proto::quote::SerializableMessage;
+use crate::templater::image::SteelImage;
 use steel::HashMap;
 use steel::SteelErr;
 use steel::compiler::program::Executable;
@@ -13,15 +15,47 @@ use steel::steel_vm::engine::Engine;
 pub use types::SchemeNode;
 use types::TextContext;
 
+pub struct Symbols {
+    username: SteelVal,
+    user_status: SteelVal,
+    user_role: SteelVal,
+    content: SteelVal,
+    image: SteelVal,
+    avatar_initials: SteelVal,
+    avatar_color_top: SteelVal,
+    avatar_color_bottom: SteelVal,
+}
+
+impl Symbols {
+    fn default() -> Self {
+        Self {
+            username: SteelVal::SymbolV("username".into()),
+            user_status: SteelVal::SymbolV("user_status".into()),
+            user_role: SteelVal::SymbolV("user_role".into()),
+            content: SteelVal::SymbolV("content".into()),
+            image: SteelVal::SymbolV("image".into()),
+            avatar_initials: SteelVal::SymbolV("avatar_initials".into()),
+            avatar_color_top: SteelVal::SymbolV("avatar_color_top".into()),
+            avatar_color_bottom: SteelVal::SymbolV("avatar_color_bottom".into()),
+        }
+    }
+}
+
 pub struct Templater {
     engine: Engine,
+    symbols: Symbols,
+    payload_map: HashMap<SteelVal, SteelVal>,
 }
 
 impl Templater {
     pub fn new() -> Self {
         let mut engine = Engine::new();
         functions::register_all(&mut engine);
-        Self { engine }
+        Self {
+            engine,
+            symbols: Symbols::default(),
+            payload_map: HashMap::new(),
+        }
     }
 
     pub fn compile_str(&mut self, template_src: &'static str) -> Result<Executable, SteelErr> {
@@ -35,42 +69,48 @@ impl Templater {
         Ok(executable)
     }
 
+    pub fn update_payload(&mut self, msg: &mut SerializableMessage) -> Result<(), SteelErr> {
+        self.payload_map.insert(self.symbols.username.clone(), SteelVal::StringV(msg.username.as_str().into()));
+        if let Some(ref status) = msg.user_status {
+            self.payload_map.insert(self.symbols.user_status.clone(), SteelVal::StringV(status.as_str().into()));
+        }
+        if let Some(ref role) = msg.user_role {
+            self.payload_map.insert(self.symbols.user_role.clone(), SteelVal::StringV(role.as_str().into()));
+        }
+        self.payload_map.insert(self.symbols.content.clone(), SteelVal::StringV(msg.content.as_str().into()));
+
+        self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
+        
+        let initials = msg.username.split_whitespace()
+            .take(2)
+            .filter_map(|s| s.chars().next())
+            .collect::<String>()
+            .to_uppercase();
+        self.payload_map.insert(self.symbols.avatar_initials.clone(), SteelVal::StringV(initials.into()));
+        
+        let (top, bottom) = Self::grad_colors(msg.grad_id as u64);
+        self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(top.into()));
+        self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
+
+        let payload_val = SteelVal::HashMapV(Gc::new(std::mem::take(&mut self.payload_map)).into());
+
+        let ctx = TextContext {
+            content: std::mem::take(&mut msg.content),
+            entities: std::mem::take(&mut msg.entities)
+        };
+        self.engine.update_value("payload", payload_val);
+        self.engine.update_value("text-context", ctx.into_steelval()?);
+        Ok(())
+    }
+
     pub fn render_template(
         &mut self,
         template: &Executable,
-        msg: &SerializableMessage,
+        msg: &mut SerializableMessage,
     ) -> Result<Node, Box<dyn std::error::Error>> {
-        let mut map: HashMap<SteelVal, SteelVal> = HashMap::new();
-        
-        map.insert(SteelVal::SymbolV("username".into()), SteelVal::StringV(msg.username.as_str().into()));
-        if let Some(ref status) = msg.user_status {
-            map.insert(SteelVal::SymbolV("user_status".into()), SteelVal::StringV(status.as_str().into()));
-        }
-        if let Some(ref role) = msg.user_role {
-            map.insert(SteelVal::SymbolV("user_role".into()), SteelVal::StringV(role.as_str().into()));
-        }
-        map.insert(SteelVal::SymbolV("content".into()), SteelVal::StringV(msg.content.as_str().into()));
-
-        use base64::prelude::*;
-        let b64_img = BASE64_STANDARD.encode(&msg.image);
-        map.insert(SteelVal::SymbolV("image".into()), SteelVal::StringV(b64_img.into()));
-        
-        let initials = msg.username.split_whitespace().take(2).filter_map(|s| s.chars().next()).collect::<String>().to_uppercase();
-        map.insert(SteelVal::SymbolV("avatar_initials".into()), SteelVal::StringV(initials.into()));
-        
-        let colors = Self::grad_colors(msg.grad_id as u64);
-        map.insert(SteelVal::SymbolV("avatar_color_top".into()), SteelVal::StringV(colors.0.into()));
-        map.insert(SteelVal::SymbolV("avatar_color_bottom".into()), SteelVal::StringV(colors.1.into()));
-        
-        let payload_val = SteelVal::HashMapV(Gc::new(map).into());
-
-        let ctx = TextContext { content: msg.content.clone(), entities: msg.entities.clone(), };
-        self.engine.update_value("payload", payload_val);
-        self.engine.update_value("text-context", ctx.into_steelval()?);
-
+        self.update_payload(msg)?;
         let res = self.engine.run_executable(template)?;
-        let last_val = res
-            .last()
+        let last_val = res.last()
             .ok_or("Template returned no value")?;
 
         extract_node(last_val)
@@ -80,7 +120,7 @@ impl Templater {
     fn compile_and_render_template(
         &mut self,
         template: &'static str,
-        msg: &SerializableMessage,
+        msg: &mut SerializableMessage,
     ) -> Result<Node, Box<dyn std::error::Error>> {
         let executable = self.compile_str(template)?;
         self.render_template(&executable, msg)
@@ -88,13 +128,13 @@ impl Templater {
 
     fn grad_colors(grad_id: u64) -> (&'static str, &'static str) {
         match grad_id % 7 {
-            0 => ("#FF516A", "#FF885E"), // Red
-            1 => ("#FFA85C", "#FFCD6A"), // Orange
-            2 => ("#8C79F2", "#B37DF2"), // Purple
-            3 => ("#51BB3F", "#8AE451"), // Green
-            4 => ("#34C6CD", "#4CE9C2"), // Cyan
-            5 => ("#549CFF", "#3CB9FE"), // Blue
-            _ => ("#F2799B", "#F27DF2"), // Pink
+            0 => ("#FF845E", "#D45246"), // Red
+            1 => ("#FEBB5B", "#F68136"), // Orange
+            2 => ("#B694F9", "#6C61DF"), // Violet
+            3 => ("#9AD164", "#46BA43"), // Green
+            4 => ("#5BCBE3", "#359AD4"), // Cyan
+            5 => ("#5CAFFA", "#408ACF"), // Blue
+            _ => ("#FF8AAC", "#D95574"), // Pink
         }
     }
 }
@@ -109,7 +149,7 @@ fn extract_node(val: &SteelVal) -> Result<Node, Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use crate::primitives::node::Content;
-    use crate::quote::{Entity, SerializableMessage};
+    use crate::proto::quote::{Entity, SerializableMessage};
 
     fn epsilon() -> f32 {
         0.0001
@@ -120,7 +160,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             "(node (style (width (px 100)) (height (px 50))))",
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         assert!(matches!(node.content, Content::Group(ref c) if c.is_empty()));
         assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
@@ -132,7 +172,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             "(node (shape (rect) (fill (solid (hex \"#FF0000\")))))",
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_some()));
     }
@@ -142,7 +182,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'username "Default")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 username: "Alice".to_string(),
                 ..Default::default()
             },
@@ -158,7 +198,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'missing_key "fallback")))"#,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         match &node.content {
             Content::Text(rich) => assert_eq!(rich.text, "fallback"),
@@ -171,7 +211,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_initials "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 username: "John Doe".to_string(),
                 ..Default::default()
             },
@@ -187,7 +227,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_initials "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 username: "Alice".to_string(),
                 ..Default::default()
             },
@@ -203,7 +243,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_initials "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 username: "Foo Bar Baz".to_string(),
                 ..Default::default()
             },
@@ -219,7 +259,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_color_top "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 grad_id: 3,
                 ..Default::default()
             },
@@ -233,10 +273,10 @@ mod tests {
     #[test]
     fn render_with_entities_bold() {
         let mut t = Templater::new();
-        let payload = r#"{"content": "Hello bold world"}"#;
+        let _payload = r#"{"content": "Hello bold world"}"#;
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "Hello bold world".to_string(),
                 entities: vec![Entity { r#type: "bold".to_string(), offset: 6, length: 4 }],
                 ..Default::default()
@@ -258,7 +298,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "hi there".to_string(),
                 entities: vec![Entity { r#type: "italic".to_string(), offset: 0, length: 2 }],
                 ..Default::default()
@@ -277,7 +317,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "click here".to_string(),
                 entities: vec![Entity { r#type: "text_link".to_string(), offset: 6, length: 4 }],
                 ..Default::default()
@@ -299,7 +339,7 @@ mod tests {
             r#"(node (style (flex-column))
                  (node (style (width (px 100)) (height (px 30))))
                  (node (style (width (px 100)) (height (px 30)))))"#,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         match &node.content {
             Content::Group(children) => assert_eq!(children.len(), 2),
@@ -314,7 +354,7 @@ mod tests {
             r#"(node (style (flex-row) (align-center) (justify-between)
                          (padding (px 10)) (gap (px 5))
                          (opacity 0.8) (rotate 45)))"#,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         assert!((node.style.opacity - 0.8).abs() < epsilon());
         assert!((node.style.rotate_deg - 45.0).abs() < epsilon() as f64);
@@ -325,7 +365,7 @@ mod tests {
         let mut t = Templater::new();
         let result = t.compile_and_render_template(
             "(this is not valid scheme +++",
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         );
         assert!(result.is_err());
     }
@@ -337,7 +377,7 @@ mod tests {
             r#"(if #t
                  (node (style (width (px 100)) (height (px 100))))
                  (node (style (width (px 50)) (height (px 50)))))"#,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
         assert_eq!(node.style.layout.size.height, taffy::prelude::Dimension::length(100.0));
@@ -348,7 +388,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r##"(node (shape (rect) (fill (linear-gradient (hex "#FF0000") (hex "#0000FF")))))"##,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         match &node.content {
             Content::Shape { fill: Some(crate::primitives::paint::Paint::LinearGradient { .. }), .. } => {}
@@ -361,7 +401,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r##"(node (shape (rounded-rect (px 10)) (fill (solid (hex "#000000")))))"##,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { .. }));
     }
@@ -371,7 +411,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r##"(node (shape (circle (px 50)) (fill (solid (hex "#FF0000")))))"##,
-            &SerializableMessage::default(),
+            &mut SerializableMessage::default(),
         ).unwrap();
         assert!(matches!(node.content, Content::Shape { .. }));
     }
@@ -391,7 +431,7 @@ mod tests {
             let mut t = Templater::new();
             let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_color_top "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 grad_id: grad_id as i32,
                 ..Default::default()
             },
@@ -408,7 +448,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_color_bottom "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 grad_id: 5,
                 ..Default::default()
             },
@@ -424,7 +464,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "underline".to_string(), offset: 0, length: 5 }],
                 ..Default::default()
@@ -443,7 +483,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 }],
                 ..Default::default()
@@ -462,7 +502,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "code".to_string(), offset: 0, length: 5 }],
                 ..Default::default()
@@ -481,7 +521,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "/start".to_string(),
                 entities: vec![Entity { r#type: "bot_command".to_string(), offset: 0, length: 6 }],
                 ..Default::default()
@@ -501,7 +541,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "http://a.com".to_string(),
                 entities: vec![Entity { r#type: "url".to_string(), offset: 0, length: 12 }],
                 ..Default::default()
@@ -521,7 +561,7 @@ mod tests {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'content "")))"#,
-            &SerializableMessage {
+            &mut SerializableMessage {
                 content: "@user".to_string(),
                 entities: vec![Entity { r#type: "mention".to_string(), offset: 0, length: 5 }],
                 ..Default::default()

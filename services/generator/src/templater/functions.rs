@@ -2,7 +2,6 @@ use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
 use crate::primitives::text::{RichText, SpoilerStyle, TextAlign};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as Base64Engine};
 use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
@@ -10,6 +9,7 @@ use std::sync::Arc;
 use steel::SteelErr;
 use taffy::prelude::*;
 use vello::peniko::ImageBrush;
+use crate::templater::image::SteelImage;
 use crate::templater::types::TextMod::Weight;
 use super::types::*;
 
@@ -612,15 +612,16 @@ fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, St
 }
 
 fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
-    let b64_str = match &data {
-        SteelVal::StringV(s) => s.to_string(),
-        other => return Err(format!("image: first argument must be a base64 string, got {:?}", other)),
-    };
+    let image = SteelImage::from_steelval(data)?;
 
-    let bytes = BASE64_STANDARD.decode(&b64_str)
-        .map_err(|e| format!("image: invalid base64: {}", e))?;
+    if image.is_empty() {
+        return Ok(SchemeNode(Node {
+            style: Style::default(),
+            content: Content::Group(vec![]),
+        }));
+    }
 
-    let img = image::load_from_memory(&bytes)
+    let img = image::load_from_memory(image.as_slice())
         .map_err(|e| format!("image: failed to decode image: {}", e))?;
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
@@ -759,6 +760,7 @@ fn is_void_or_empty(val: &SteelVal) -> bool {
 mod tests {
     use super::*;
     use steel::rvals::IntoSteelVal;
+    use crate::proto::quote::Entity;
 
     fn epsilon() -> f32 {
         0.0001
@@ -1498,14 +1500,14 @@ mod tests {
         let content = SteelVal::StringV(text.into());
         let mods = make_steel_list(vec![]);
         let entities = vec![
-            crate::quote::Entity { r#type: "bold".to_string(), offset: 6, length: 4 },
-            crate::quote::Entity { r#type: "italic".to_string(), offset: 0, length: 5 },
-            crate::quote::Entity { r#type: "underline".to_string(), offset: 0, length: 5 },
-            crate::quote::Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 },
-            crate::quote::Entity { r#type: "code".to_string(), offset: 0, length: 5 },
-            crate::quote::Entity { r#type: "text_link".to_string(), offset: 0, length: 5 },
-            crate::quote::Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
-            crate::quote::Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "bold".to_string(), offset: 6, length: 4 },
+            Entity { r#type: "italic".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "underline".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "code".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "text_link".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
         ];
         let result = fn_make_text(
             content, mods,
@@ -1543,9 +1545,8 @@ mod tests {
         let mut buf = std::io::Cursor::new(Vec::new());
         let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
-        let b64 = BASE64_STANDARD.encode(buf.into_inner());
 
-        let data = SteelVal::StringV(b64.into());
+        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
         let args = make_steel_list(vec![]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { .. }));
@@ -1556,10 +1557,9 @@ mod tests {
         let mut buf = std::io::Cursor::new(Vec::new());
         let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
-        let b64 = BASE64_STANDARD.encode(buf.into_inner());
 
         let clip = SchemeShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
-        let data = SteelVal::StringV(b64.into());
+        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
         let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));

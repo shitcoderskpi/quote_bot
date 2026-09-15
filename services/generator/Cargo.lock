@@ -209,12 +209,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "base64"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
-
-[[package]]
 name = "bigdecimal"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -884,7 +878,6 @@ name = "generator"
 version = "0.2.1"
 dependencies = [
  "async-channel",
- "base64",
  "image",
  "parley",
  "prost",

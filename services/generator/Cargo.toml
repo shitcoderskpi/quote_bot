@@ -4,7 +4,6 @@ version = "0.2.1"
 edition = "2024"
 
 [dependencies]
-base64 = "0.23.1"
 image = { version = "0.25.10", features = ["webp"] }
 parley = "0.11.1"
 redis = { version = "1.7.0", features = ["tokio-comp"] }

@@ -1,11 +1,8 @@
-#!/usr/bin/env python3
-
 import argparse
 import json
 import os
 import sys
 import time
-from base64 import b64encode, b64decode
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Optional
@@ -52,17 +49,17 @@ class FakeMessage:
             msg.dpi = self.dpi
         if self.theme != "light":
             msg.theme = self.theme
-            
+
         if self.header:
             msg.message_id = self.header.get("message_id", 0)
             msg.chat_id = self.header.get("chat", {}).get("id", 0)
-            
+
         for ent in self.entities:
             pb_ent = msg.entities.add()
             pb_ent.type = ent["type"]
             pb_ent.offset = ent["offset"]
             pb_ent.length = ent["length"]
-            
+
         return msg.SerializeToString()
 
 
@@ -109,6 +106,41 @@ TESTS: dict[str, FakeMessage] = {
         entities=[
             {"type": "bold", "offset": 6, "length": 4},
             {"type": "italic", "offset": 15, "length": 6},
+        ],
+        header=make_header(),
+        image_bytes=None,
+    ),
+    "more_entities": FakeMessage(
+        grad_id=3,
+        username="More Entities User",
+        user_status=None,
+        user_role="member",
+        content="Spoiler text, code here, and underline!",
+        entities=[
+            {"type": "spoiler", "offset": 0, "length": 7},
+            {"type": "code", "offset": 14, "length": 9},
+            {"type": "underline", "offset": 29, "length": 9},
+        ],
+        header=make_header(),
+        image_bytes=None,
+    ),
+    "all_entities": FakeMessage(
+        grad_id=4,
+        username="All Entities",
+        user_status=None,
+        user_role="member",
+        content="b i u s code pre spoiler link mention emoji",
+        entities=[
+            {"type": "bold", "offset": 0, "length": 1},
+            {"type": "italic", "offset": 2, "length": 1},
+            {"type": "underline", "offset": 4, "length": 1},
+            {"type": "strikethrough", "offset": 6, "length": 1},
+            {"type": "code", "offset": 8, "length": 4},
+            {"type": "pre", "offset": 13, "length": 3},
+            {"type": "spoiler", "offset": 17, "length": 7},
+            {"type": "text_link", "offset": 25, "length": 4},
+            {"type": "mention", "offset": 30, "length": 7},
+            {"type": "custom_emoji", "offset": 38, "length": 5},
         ],
         header=make_header(),
         image_bytes=None,
@@ -207,7 +239,7 @@ def run_test(
     if not result_msg.image:
         print(f"  {Colors.RED}Missing 'image' in response{Colors.RESET}")
         return False
-        
+
     img = result_msg.image
 
     if msg.header:
@@ -222,7 +254,9 @@ def run_test(
     fmt_str = "WebP" if is_webp else "unknown"
 
     print(f"  {Colors.DIM}Image     : {len(img)} bytes ({fmt_str}){Colors.RESET}")
-    print(f"  {Colors.DIM}Header    : chat_id={result_msg.chat_id} message_id={result_msg.message_id}{Colors.RESET}")
+    print(
+        f"  {Colors.DIM}Header    : chat_id={result_msg.chat_id} message_id={result_msg.message_id}{Colors.RESET}"
+    )
     print(f"  {Colors.DIM}Roundtrip : {elapsed_ms:.0f} ms{Colors.RESET}")
 
     if not is_webp:

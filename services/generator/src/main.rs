@@ -26,14 +26,14 @@ async fn process_job<'a>(
     buf: &'a mut Vec<u8>,
 ) -> Result<&'a mut Vec<u8>, Box<dyn std::error::Error>> {
     use prost::Message;
-    let input_msg = proto::quote::SerializableMessage::decode(raw)?;
+    let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
     
     let dpi = input_msg.dpi.unwrap_or(cfg.dpi as i32) as f32;
     let theme = if input_msg.theme.is_empty() { "light" } else { &input_msg.theme };
 
     let executable = themes.get(theme).ok_or_else(|| format!("Template {} not found", theme))?;
 
-    let node_tree = templater.render_template(executable, &input_msg)?;
+    let node_tree = templater.render_template(executable, &mut input_msg)?;
 
     let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
 
