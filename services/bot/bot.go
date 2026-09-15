@@ -21,23 +21,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var supportedEntityTypes = map[string]bool{
-	"bold":          true,
-	"italic":        true,
-	"underline":     true,
-	"strikethrough": true,
-	"code":          true,
-	"pre":           true,
-	"text_link":     true,
-	"url":           true,
-	"mention":       true,
-	"bot_command":   true,
-	"hashtag":       true,
-	"cashtag":       true,
-	"email":         true,
-	"phone_number":  true,
-	"text_mention":  true,
-	"spoiler":       true,
+func supportedEntityType(t string) bool {
+	switch t {
+	case "bold", "italic", "underline", "strikethrough", "code", "pre",
+		"text_link", "url", "mention", "bot_command", "hashtag",
+		"cashtag", "email", "phone_number", "text_mention", "spoiler":
+		return true
+	}
+	return false
 }
 
 func convertEntities(text string, entities []gotgbot.MessageEntity) []*pb.Entity {
@@ -56,7 +47,7 @@ func convertEntities(text string, entities []gotgbot.MessageEntity) []*pb.Entity
 
 	result := make([]*pb.Entity, 0, len(entities))
 	for _, ent := range entities {
-		if !supportedEntityTypes[ent.Type] {
+		if !supportedEntityType(ent.Type) {
 			continue
 		}
 
