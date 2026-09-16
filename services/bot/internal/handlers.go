@@ -32,14 +32,14 @@ func optionalString(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return proto.String(s)
+	return new(s)
 }
 
 func optionalInt32(v *int) *int32 {
 	if v == nil {
 		return nil
 	}
-	return proto.Int32(int32(*v))
+	return new(int32(*v))
 }
 
 func userAvatar(b *gotgbot.Bot, userID int64) []byte {
@@ -64,7 +64,12 @@ func userAvatar(b *gotgbot.Bot, userID int64) []byte {
 		log.Printf("Failed to download profile photo for user %d: %v", userID, err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body reader: %v", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Failed to download profile photo for user %d: status %d", userID, resp.StatusCode)
@@ -94,6 +99,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 				} else {
 					parsed, err := strconv.Atoi(argLower)
 					if err == nil {
+						parsed = max(min(parsed, 72), 300)
 						dpi = &parsed
 					} else {
 						_, _ = msg.Reply(b, "DPI must be an integer, or theme must be 'dark'/'light'.", nil)
@@ -151,7 +157,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 			GradId:     int32(reply.From.Id % 7),
 			Username:   reply.From.FirstName,
 			UserStatus: optionalString(customTitle),
-			UserRole:   proto.String(userStatus),
+			UserRole:   new(userStatus),
 			Content:    text,
 			Entities:   convertedEntities,
 			Image:      avatar,
