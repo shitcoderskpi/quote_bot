@@ -2,6 +2,11 @@ services:
   redis:
     container_name: redis
     image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - monitoring
   bot:
@@ -13,7 +18,8 @@ services:
       context: ../services/bot
       dockerfile: Dockerfile
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - BOT_TOKEN
       - REDIS_HOST
@@ -33,7 +39,8 @@ services:
       context: ../services/generator/
       dockerfile: Dockerfile
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - RUST_LOG=info
       - REDIS_HOST

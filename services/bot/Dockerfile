@@ -1,4 +1,4 @@
-FROM golang:alpine AS builder
+FROM golang:1.27-alpine3.23 AS builder
 
 WORKDIR /app
 
@@ -6,9 +6,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot ./cmd/bot
 
-FROM alpine:latest
+FROM alpine:3.23
 RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app

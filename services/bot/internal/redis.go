@@ -1,4 +1,4 @@
-package main
+package bot
 
 import (
 	"context"
@@ -8,6 +8,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type Queue interface {
+	Enqueue(ctx context.Context, name string, data []byte) error
+	Dequeue(ctx context.Context, name string, timeout time.Duration) ([]byte, error)
+	Close() error
+}
+
 type RedisQueue struct {
 	client *redis.Client
 }
@@ -16,6 +22,7 @@ func NewRedisQueue(host string) *RedisQueue {
 	if !strings.Contains(host, ":") {
 		host = host + ":6379"
 	}
+
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     host,
 		Password: "",
@@ -40,10 +47,6 @@ func (r *RedisQueue) Dequeue(ctx context.Context, name string, timeout time.Dura
 		return []byte(res[1]), nil
 	}
 	return nil, nil
-}
-
-func (r *RedisQueue) Delete(ctx context.Context, name string) error {
-	return r.client.Del(ctx, name).Err()
 }
 
 func (r *RedisQueue) Close() error {

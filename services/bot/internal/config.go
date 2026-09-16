@@ -1,4 +1,4 @@
-package main
+package bot
 
 import (
 	"log"
@@ -11,23 +11,22 @@ type Config struct {
 	LogPath   string
 }
 
-func LoadConfig() Config {
+func envDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
 
+func LoadConfig() Config {
 	botToken := os.Getenv("BOT_TOKEN")
 	if botToken == "" {
 		log.Fatal("BOT_TOKEN is not set in environment")
 	}
 
-	redisHost := os.Getenv("REDIS_HOST")
-	if redisHost == "" {
-		redisHost = "localhost"
-	}
-
-	logPath := os.Getenv("LOG_PATH")
-
 	return Config{
 		BotToken:  botToken,
-		RedisHost: redisHost,
-		LogPath:   logPath,
+		RedisHost: envDefault("REDIS_HOST", "localhost"),
+		LogPath:   os.Getenv("LOG_PATH"),
 	}
 }
