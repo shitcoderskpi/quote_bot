@@ -174,7 +174,7 @@ func quoteHandler(redisQueue *RedisQueue) func(b *gotgbot.Bot, ctx *ext.Context)
 
 		var dpiPtr *int32
 		if dpi != nil {
-			val := int32(*dpi)
+			val := max(min(int32(*dpi), 300), 72)
 			dpiPtr = &val
 		}
 
