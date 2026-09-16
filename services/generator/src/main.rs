@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use steel::compiler::program::Executable;
+use steel::rerrs::ErrorKind;
+use steel::SteelErr;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use vello::kurbo::Rect;
@@ -83,7 +85,7 @@ async fn process_job<'a>(
     Ok(buf)
 }
 
-async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> HashMap<String, Executable> {
+async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> Result<HashMap<String, Executable>, SteelErr> {
     let mut map = HashMap::new();
     let mut tasks = Vec::new();
     
@@ -111,15 +113,21 @@ async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater)
     
     for task in tasks {
         if let Ok((name, content)) = task.await {
-            if let Ok(exec) = templater.compile(content) {
-                map.insert(name, exec);
-            } else {
-                error!("Failed to compile template: {}", name);
+            match templater.compile(content){
+                Ok(exec) => {
+                    map.insert(name, exec);
+                },
+                Err(e) => {
+                    return Err(SteelErr::new(
+                        ErrorKind::Parse,
+                        format!("Failed to compile template {}: {}", name, e)
+                    ));
+                }
             }
         }
     }
-    
-    map
+
+    Ok(map)
 }
 
 #[tokio::main]
@@ -141,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let themes = read_and_compile_templates(
         &cfg.templates_dir,
         &mut templater
-    ).await;
+    ).await?;
 
     info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
     let mut queue = redis_queue::RedisQueue::connect(&cfg).await?;

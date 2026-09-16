@@ -24,6 +24,7 @@ pub struct Symbols {
     avatar_initials: SteelVal,
     avatar_color_top: SteelVal,
     avatar_color_bottom: SteelVal,
+    name_color: SteelVal,
 }
 
 impl Symbols {
@@ -37,6 +38,7 @@ impl Symbols {
             avatar_initials: SteelVal::SymbolV("avatar_initials".into()),
             avatar_color_top: SteelVal::SymbolV("avatar_color_top".into()),
             avatar_color_bottom: SteelVal::SymbolV("avatar_color_bottom".into()),
+            name_color: SteelVal::SymbolV("name_color".into()),
         }
     }
 }
@@ -58,6 +60,7 @@ impl Templater {
         }
     }
 
+    #[cfg(test)]
     pub fn compile_str(&mut self, template_src: &'static str) -> Result<Executable, SteelErr> {
         let program = self.engine.emit_raw_program_no_path(template_src)?;
         let executable = self.engine.raw_program_to_executable(program)?;
@@ -79,7 +82,9 @@ impl Templater {
         }
         self.payload_map.insert(self.symbols.content.clone(), SteelVal::StringV(msg.content.as_str().into()));
 
-        self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
+        if !msg.image.is_empty() {
+            self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
+        }
         
         let initials = msg.username.split_whitespace()
             .take(2)
@@ -88,9 +93,11 @@ impl Templater {
             .to_uppercase();
         self.payload_map.insert(self.symbols.avatar_initials.clone(), SteelVal::StringV(initials.into()));
         
-        let (top, bottom) = Self::grad_colors(msg.grad_id as u64);
-        self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(top.into()));
-        self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
+        let (c1, c2) = Self::grad_colors(msg.grad_id as u64);
+        let nc = Self::peer_color(msg.grad_id as u64);
+        self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(c1.into()));
+        self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(c2.into()));
+        self.payload_map.insert(self.symbols.name_color.clone(), SteelVal::StringV(nc.into()));
 
         let payload_val = SteelVal::HashMapV(Gc::new(std::mem::take(&mut self.payload_map)).into());
 
@@ -135,6 +142,18 @@ impl Templater {
             4 => ("#5BCBE3", "#359AD4"), // Cyan
             5 => ("#5CAFFA", "#408ACF"), // Blue
             _ => ("#FF8AAC", "#D95574"), // Pink
+        }
+    }
+
+    fn peer_color(grad_id: u64) -> &'static str {
+        match grad_id % 7 {
+            0 => "#E17076", // Red
+            1 => "#EFA65A", // Orange
+            2 => "#A695E7", // Purple
+            3 => "#7BC862", // Green
+            4 => "#6EC9CB", // Cyan
+            5 => "#65AADD", // Blue
+            _ => "#EE7AAE", // Pink
         }
     }
 }
@@ -265,7 +284,7 @@ mod tests {
             },
         ).unwrap();
         match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "#51BB3F"),
+            Content::Text(rich) => assert_eq!(rich.text, "#9AD164"),
             other => panic!("Expected Text, got {:?}", other),
         }
     }
@@ -326,7 +345,7 @@ mod tests {
         match &node.content {
             Content::Text(rich) => {
                 assert_eq!(rich.spans[0].underline, true);
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -418,14 +437,14 @@ mod tests {
 
     #[test]
     fn render_avatar_colors_all_grad_ids() {
-        let expected_tops = [
-            (0, "#FF516A"),
-            (1, "#FFA85C"),
-            (2, "#8C79F2"),
-            (3, "#51BB3F"),
-            (4, "#34C6CD"),
-            (5, "#549CFF"),
-            (6, "#F2799B"),
+        let expected_tops = vec![
+            (0, "#FF845E"),
+            (1, "#FEBB5B"),
+            (2, "#B694F9"),
+            (3, "#9AD164"),
+            (4, "#5BCBE3"),
+            (5, "#5CAFFA"),
+            (6, "#FF8AAC"),
         ];
         for (grad_id, expected_top) in expected_tops {
             let mut t = Templater::new();
@@ -454,7 +473,7 @@ mod tests {
             },
         ).unwrap();
         match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "#3CB9FE"),
+            Content::Text(rich) => assert_eq!(rich.text, "#408ACF"),
             other => panic!("Expected Text, got {:?}", other),
         }
     }
@@ -529,7 +548,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
                 assert!(!rich.spans[0].underline);
             }
             other => panic!("Expected Text, got {:?}", other),
@@ -549,7 +568,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
                 assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),
@@ -569,7 +588,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
                 assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),

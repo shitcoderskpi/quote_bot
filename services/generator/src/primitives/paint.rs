@@ -1,12 +1,12 @@
 use vello::peniko::{Brush, Color, ColorStop, ColorStops, Extend, Gradient};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Stop {
     pub offset: f32,
     pub color: Color,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Paint {
     Solid(Color),
     LinearGradient {
@@ -14,12 +14,14 @@ pub enum Paint {
         end: (f64, f64),
         stops: Vec<Stop>,
         extend: Extend,
+        alpha: f32,
     },
     RadialGradient {
         center: (f64, f64),
         radius: f64,
         stops: Vec<Stop>,
         extend: Extend,
+        alpha: f32,
     },
     SweepGradient {
         center: (f64, f64),
@@ -27,17 +29,24 @@ pub enum Paint {
         end_angle: f32,
         stops: Vec<Stop>,
         extend: Extend,
+        alpha: f32,
     },
+}
+
+impl Default for Paint {
+    fn default() -> Self {
+        Paint::Solid(Color::BLACK)
+    }
 }
 
 impl Paint {
     pub fn solid(color: Color) -> Self {
         Paint::Solid(color)
     }
-    fn build_stops(stops: &[Stop]) -> ColorStops {
+    fn build_stops(stops: &[Stop], alpha_factor: f32) -> ColorStops {
         stops
             .iter()
-            .map(|s| ColorStop { offset: s.offset, color: s.color.into() })
+            .map(|s| ColorStop { offset: s.offset, color: s.color.with_alpha(alpha_factor).into() })
             .collect::<Vec<_>>()
             .as_slice()
             .into()
@@ -46,34 +55,54 @@ impl Paint {
     pub fn to_brush(&self, box_w: f64, box_h: f64) -> Brush {
         match self {
             Paint::Solid(c) => Brush::Solid(*c),
-            Paint::LinearGradient { start, end, stops, extend } => {
-                let (x0, y0) = (start.0 * box_w, start.1 * box_h);
-                let (x1, y1) = (end.0 * box_w, end.1 * box_h);
-                let mut g = Gradient::new_linear((x0, y0), (x1, y1));
-                g.stops = Self::build_stops(stops);
+            Paint::LinearGradient { start, end, stops, extend, alpha } => {
+                let mut g = Gradient::new_linear(
+                    (start.0 * box_w, start.1 * box_h),
+                    (end.0 * box_w, end.1 * box_h),
+                );
+                g.stops = Self::build_stops(stops, *alpha);
                 g.extend = *extend;
                 Brush::Gradient(g)
             }
-            Paint::RadialGradient { center, radius, stops, extend } => {
-                let (cx, cy) = (center.0 * box_w, center.1 * box_h);
-                let r = (radius * box_w.min(box_h)) as f32;
-                let mut g = Gradient::new_radial((cx, cy), r);
-                g.stops = Self::build_stops(stops);
+            Paint::RadialGradient { center, radius, stops, extend, alpha } => {
+                let r = radius * box_w.max(box_h);
+                let mut g = Gradient::new_radial(
+                    (center.0 * box_w, center.1 * box_h),
+                    r as f32,
+                );
+                g.stops = Self::build_stops(stops, *alpha);
                 g.extend = *extend;
                 Brush::Gradient(g)
             }
-            Paint::SweepGradient { center, start_angle, end_angle, stops, extend } => {
-                let (cx, cy) = (center.0 * box_w, center.1 * box_h);
-                let mut g = Gradient::new_sweep((cx, cy), *start_angle, *end_angle);
-                g.stops = Self::build_stops(stops);
+            Paint::SweepGradient { center, start_angle, end_angle, stops, extend, alpha } => {
+                let mut g = Gradient::new_sweep(
+                    (center.0 * box_w, center.1 * box_h),
+                    *start_angle,
+                    *end_angle,
+                );
+                g.stops = Self::build_stops(stops, *alpha);
                 g.extend = *extend;
                 Brush::Gradient(g)
             }
         }
     }
+    pub fn multiply_alpha(self, alpha_factor: f32) -> Self {
+        match self {
+            Paint::Solid(c) => Paint::Solid(c.with_alpha(alpha_factor)),
+            Paint::LinearGradient { start, end, stops, extend, alpha } => {
+                Paint::LinearGradient { start, end, stops, extend, alpha: alpha * alpha_factor }
+            }
+            Paint::RadialGradient { center, radius, stops, extend, alpha } => {
+                Paint::RadialGradient { center, radius, stops, extend, alpha: alpha * alpha_factor }
+            }
+            Paint::SweepGradient { center, start_angle, end_angle, stops, extend, alpha } => {
+                Paint::SweepGradient { center, start_angle, end_angle, stops, extend, alpha: alpha * alpha_factor }
+            }
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Stroke {
     pub width: f64,
     pub color: Color,
@@ -109,7 +138,7 @@ mod tests {
             start: (0.0, 0.0),
             end: (1.0, 1.0),
             stops: two_stops(),
-            extend: Extend::default(),
+            extend: Extend::default(), alpha: 1.0,
         };
         let brush = paint.to_brush(200.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
@@ -121,7 +150,7 @@ mod tests {
             start: (0.0, 0.0),
             end: (1.0, 1.0),
             stops: two_stops(),
-            extend: Extend::default(),
+            extend: Extend::default(), alpha: 1.0,
         };
         let brush = paint.to_brush(200.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
@@ -133,7 +162,7 @@ mod tests {
             center: (0.5, 0.5),
             radius: 0.5,
             stops: two_stops(),
-            extend: Extend::default(),
+            extend: Extend::default(), alpha: 1.0,
         };
         let brush = paint.to_brush(100.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
@@ -146,7 +175,7 @@ mod tests {
             start_angle: 0.0,
             end_angle: 360.0,
             stops: two_stops(),
-            extend: Extend::default(),
+            extend: Extend::default(), alpha: 1.0,
         };
         let brush = paint.to_brush(100.0, 100.0);
         assert!(matches!(brush, Brush::Gradient(_)));
@@ -159,7 +188,7 @@ mod tests {
             Stop { offset: 0.5, color: Color::from_rgb8(128, 128, 128) },
             Stop { offset: 1.0, color: Color::WHITE },
         ];
-        let cs: ColorStops = Paint::build_stops(&stops);
+        let cs: ColorStops = Paint::build_stops(&stops, 1.0);
         assert_eq!(cs.len(), 3);
     }
 
