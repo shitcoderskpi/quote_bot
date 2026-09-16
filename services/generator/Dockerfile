@@ -44,8 +44,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY 50-emoji.conf /etc/fonts/conf.d/50-emoji.conf
 RUN fc-cache -f
 
-COPY --from=builder /usr/src/generator_rs/target/release/generator_rs /usr/local/bin/generator_rs
+COPY --from=builder /usr/src/generator_rs/target/release/generator /usr/local/bin/generator
 COPY templates /app/templates
 
 
-CMD ["generator_rs"]
+CMD ["generator"]

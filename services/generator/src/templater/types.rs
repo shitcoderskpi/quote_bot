@@ -287,7 +287,7 @@ impl Custom for SchemeRichText {}
 #[derive(Clone, Debug, Default)]
 pub struct TextContext {
     pub content: String,
-    pub entities: Vec<serde_json::Value>,
+    pub entities: Vec<crate::proto::quote::Entity>,
 }
 impl Custom for TextContext {}
 

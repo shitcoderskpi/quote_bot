@@ -1,13 +1,17 @@
-FROM python:3.10-slim
+FROM golang:1.27-alpine3.23 AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir -r requirements.txt
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot ./cmd/bot
 
-EXPOSE 8000
+FROM alpine:3.23
+RUN apk --no-cache add ca-certificates tzdata
 
-CMD ["python", "main.py"]
+WORKDIR /app
+COPY --from=builder /app/bot .
+
+CMD ["/app/bot"]
