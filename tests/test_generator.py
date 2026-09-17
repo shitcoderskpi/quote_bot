@@ -7,13 +7,14 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Optional
 
-import redis
+import asyncio
+import nats
+from nats.errors import TimeoutError
 import zstandard as zstd
 
 import quote_pb2
 
-REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 JOBS_QUEUE = "generate:jobs"
 RESULTS_QUEUE = "generate:results"
 
@@ -181,8 +182,9 @@ class Colors:
     BOLD = "\033[1m"
 
 
-def run_test(
-    r: redis.Redis,
+async def run_test(
+    nc,
+    js,
     name: str,
     msg: FakeMessage,
     timeout: int,
@@ -205,10 +207,10 @@ def run_test(
     print(
         f"\n  {Colors.DIM}Payload   : {len(payload)} bytes PB -> {len(compressed)} bytes zstd{Colors.RESET}"
     )
-    r.delete(RESULTS_QUEUE)
-
+    
+    sub = await nc.subscribe(RESULTS_QUEUE)
     t0 = time.monotonic()
-    r.lpush(JOBS_QUEUE, compressed)
+    await js.publish(JOBS_QUEUE, compressed)
     print(f"  {Colors.DIM}Pushed to : {JOBS_QUEUE}{Colors.RESET}")
 
     print(
@@ -216,14 +218,17 @@ def run_test(
         end="",
         flush=True,
     )
-    result = r.brpop([RESULTS_QUEUE], timeout=timeout)
-    elapsed_ms = (time.monotonic() - t0) * 1000
-
-    if result is None:
+    
+    try:
+        result = await sub.next_msg(timeout=timeout)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+    except TimeoutError:
         print(f"\r  {Colors.RED}TIMEOUT - no response in {timeout}s{Colors.RESET}")
+        await sub.unsubscribe()
         return False
 
-    _, raw_result = result
+    raw_result = result.data
+    await sub.unsubscribe()
     print(
         f"\r  {Colors.DIM}Got result: {len(raw_result)} bytes in {elapsed_ms:.0f} ms{Colors.RESET}    "
     )
@@ -273,10 +278,9 @@ def run_test(
     return True
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="Test generator service locally")
-    parser.add_argument("--host", default=REDIS_HOST, help="Redis host")
-    parser.add_argument("--port", type=int, default=REDIS_PORT, help="Redis port")
+    parser.add_argument("--nats-url", default=NATS_URL, help="NATS URL")
     parser.add_argument(
         "--timeout", type=int, default=10, help="Seconds to wait for generator response"
     )
@@ -299,24 +303,33 @@ def main():
         return
 
     print(f"{Colors.BOLD}Generator Service Test Harness{Colors.RESET}")
-    print(f"Redis: {args.host}:{args.port}")
+    print(f"NATS: {args.nats_url}")
 
     try:
-        r = redis.Redis(host=args.host, port=args.port, db=0)
-        r.ping()
-    except redis.ConnectionError as e:
+        nc = await nats.connect(args.nats_url)
+        js = nc.jetstream()
+        
+        from nats.js.errors import BadRequestError
+        for queue in [JOBS_QUEUE, RESULTS_QUEUE]:
+            try:
+                await js.add_stream(name=queue, subjects=[queue])
+            except BadRequestError:
+                pass
+                
+    except Exception as e:
         print(
-            f"{Colors.RED}Cannot connect to Redis at {args.host}:{args.port}: {e}{Colors.RESET}"
+            f"{Colors.RED}Cannot connect to NATS at {args.nats_url}: {e}{Colors.RESET}"
         )
         sys.exit(1)
 
-    print(f"{Colors.GREEN}Redis connected{Colors.RESET}")
+    print(f"{Colors.GREEN}NATS connected{Colors.RESET}")
 
     if args.test:
         if args.test not in TESTS:
             print(
                 f"{Colors.RED}Unknown test '{args.test}'. Use --list to see available tests.{Colors.RESET}"
             )
+            await nc.close()
             sys.exit(1)
         tests_to_run = {args.test: TESTS[args.test]}
     else:
@@ -325,7 +338,7 @@ def main():
     passed = 0
     failed = 0
     for name, msg in tests_to_run.items():
-        ok = run_test(r, name, msg, args.timeout, args.save_images, args.output_dir)
+        ok = await run_test(nc, js, name, msg, args.timeout, args.save_images, args.output_dir)
         if ok:
             passed += 1
         else:
@@ -340,8 +353,9 @@ def main():
     print()
     print(f"{'=' * 60}")
 
+    await nc.close()
     sys.exit(0 if failed == 0 else 1)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

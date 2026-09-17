@@ -6,9 +6,9 @@ import (
 )
 
 type Config struct {
-	BotToken  string
-	RedisHost string
-	LogPath   string
+	BotToken string
+	NatsUrl  string
+	LogPath  string
 }
 
 func envDefault(key, fallback string) string {
@@ -25,8 +25,8 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		BotToken:  botToken,
-		RedisHost: envDefault("REDIS_HOST", "localhost"),
-		LogPath:   os.Getenv("LOG_PATH"),
+		BotToken: botToken,
+		NatsUrl:  envDefault("NATS_URL", "nats://localhost:4222"),
+		LogPath:  os.Getenv("LOG_PATH"),
 	}
 }

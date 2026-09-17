@@ -190,7 +190,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 			return err
 		}
 
-		resultData, err := queue.Dequeue(jobCtx, "generate:results", 0)
+		resultData, err := queue.Dequeue(jobCtx, "generate:results")
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				_, _ = msg.Reply(b, "Quote generation timed out", nil)

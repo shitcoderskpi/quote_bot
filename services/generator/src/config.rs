@@ -2,8 +2,7 @@ use std::env;
 
 #[derive(Debug)]
 pub struct Config {
-    pub redis_host: String,
-    pub redis_port: u16,
+    pub nats_url: String,
     pub queue_name: String,
     pub results_queue: String,
     pub templates_dir: String,
@@ -12,13 +11,8 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        let redis_host = env::var("REDIS_HOST").unwrap_or("127.0.0.1".to_string());
+        let nats_url = env::var("NATS_URL").unwrap_or("nats://127.0.0.1:4222".to_string());
         
-        let redis_port = env::var("REDIS_PORT")
-            .ok()
-            .and_then(|p| p.parse::<u16>().ok())
-            .unwrap_or(6379);
-
         let queue_name = env::var("QUEUE_NAME").unwrap_or("generate:jobs".to_string());
         
         let results_queue = env::var("RESULTS_QUEUE").unwrap_or("generate:results".to_string());
@@ -36,8 +30,7 @@ impl Config {
             .unwrap_or(300.0);
 
         Ok(Self {
-            redis_host,
-            redis_port,
+            nats_url,
             queue_name,
             results_queue,
             templates_dir,

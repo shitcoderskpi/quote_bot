@@ -9,7 +9,7 @@ use crate::templater::Templater;
 
 mod compressor;
 mod config;
-mod redis_queue;
+mod nats_queue;
 mod templater;
 mod primitives;
 mod renderer;
@@ -24,7 +24,7 @@ async fn process_job<'a>(
     renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
     buf: &'a mut Vec<u8>,
-) -> Result<&'a mut Vec<u8>, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message;
     let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
     
@@ -80,7 +80,7 @@ async fn process_job<'a>(
     let n = compressor::compress(&pb_data, 4, buf.as_mut_slice())?;
     buf.truncate(n);
 
-    Ok(buf)
+    Ok(())
 }
 
 async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> HashMap<String, Executable> {
@@ -143,19 +143,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut templater
     ).await;
 
-    info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
-    let mut queue = redis_queue::RedisQueue::connect(&cfg).await?;
+    info!("Connecting to NATS at {}", cfg.nats_url);
+    let mut queue = nats_queue::NatsQueue::connect(&cfg.nats_url).await?;
     let mut decmpd: Vec<u8> = Vec::new();
-    let mut cmpd: Vec<u8> = Vec::new();
 
     loop {
-        let payload = match queue.dequeue(&cfg.queue_name, 0.0).await {
-            Ok(p) => p,
+        let mut cmpd: Vec<u8> = Vec::new();
+        let payload = match queue.dequeue(&cfg.queue_name).await {
+            Ok(Some(p)) => p,
+            Ok(None) => continue,
             Err(e) => {
-                if !e.is_timeout() {
-                    error!("Error getting job: {}", e);
-                    continue;
-                }
+                error!("Error getting job: {}", e);
                 continue;
             }
         };
@@ -170,8 +168,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd).await {
-            Ok(result) => {
-                if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
+            Ok(()) => {
+                if let Err(e) = queue.enqueue(&cfg.results_queue, cmpd).await {
                     error!("Failed to enqueue result: {}", e);
                 } else {
                     info!("Pushed result for message");

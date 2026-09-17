@@ -265,7 +265,7 @@ mod tests {
             },
         ).unwrap();
         match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "#51BB3F"),
+            Content::Text(rich) => assert_eq!(rich.text, "#9AD164"),
             other => panic!("Expected Text, got {:?}", other),
         }
     }
@@ -419,20 +419,20 @@ mod tests {
     #[test]
     fn render_avatar_colors_all_grad_ids() {
         let expected_tops = [
-            (0, "#FF516A"),
-            (1, "#FFA85C"),
-            (2, "#8C79F2"),
-            (3, "#51BB3F"),
-            (4, "#34C6CD"),
-            (5, "#549CFF"),
-            (6, "#F2799B"),
+            (0, "#FF845E"), // Red
+            (1, "#FEBB5B"), // Orange
+            (2, "#B694F9"), // Violet
+            (3, "#9AD164"), // Green
+            (4, "#5BCBE3"), // Cyan
+            (5, "#5CAFFA"), // Blue
+            (6, "#FF8AAC"), // Pink
         ];
         for (grad_id, expected_top) in expected_tops {
             let mut t = Templater::new();
             let node = t.compile_and_render_template(
             r#"(node (text (get-payload 'avatar_color_top "")))"#,
             &mut SerializableMessage {
-                grad_id: grad_id as i32,
+                grad_id,
                 ..Default::default()
             },
         ).unwrap();
@@ -454,7 +454,7 @@ mod tests {
             },
         ).unwrap();
         match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "#3CB9FE"),
+            Content::Text(rich) => assert_eq!(rich.text, "#408ACF"),
             other => panic!("Expected Text, got {:?}", other),
         }
     }

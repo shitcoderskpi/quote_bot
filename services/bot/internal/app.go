@@ -20,11 +20,12 @@ func Run() {
 		}()
 	}
 
-	var queue Queue = NewRedisQueue(config.RedisHost)
+	var queue, err = NewNatsQueue(config.NatsUrl)
+	if err != nil {
+		log.Fatalf("Failed to create nats queue: %v", err)
+	}
 	defer func() {
-		if err := queue.Close(); err != nil {
-			log.Printf("Failed to close Redis queue: %v", err)
-		}
+		queue.Close()
 	}()
 
 	b, err := gotgbot.NewBot(config.BotToken, nil)
