@@ -198,8 +198,9 @@ fn draw_text_layout(scene: &mut Scene,
                     spoiler_style: SpoilerStyle,
                     default_color: &Paint,
 ) {
+    let mut pending: Vec<GlyphRun<Paint>> = Vec::new();
     for line in layout.lines() {
-        let mut pending: Vec<GlyphRun<Paint>> = Vec::new();
+        pending.clear();
         let mut pending_run_idx: Option<usize> = None;
 
         for item in line.items() {
@@ -243,10 +244,9 @@ fn flush(scene: &mut Scene,
         let window_start = glyph_run.offset() as f64;
         let window_end = window_start + glyph_run.advance() as f64;
 
-        let segments: Vec<_> = segments_all.iter()
-            .filter(|s| s.start >= window_start - 0.5 && s.start < window_end + 0.5)
-            .cloned()
-            .collect();
+        let lo = segments_all.partition_point(|s| s.end <= window_start - 0.5);
+        let hi = segments_all.partition_point(|s| s.start < window_end + 0.5);
+        let segments = &segments_all[lo..hi];
 
         if !segments.is_empty() {
             match spoiler_style {
@@ -339,23 +339,25 @@ fn draw_line(scene: &mut Scene,
              end_x: f64,
              size: f64,
              y_pos: f64,
-             sbrush: &Brush,
+             brush: &Brush,
              mut curr_x: f64) {
     for seg in segments {
+        if curr_x >= end_x { return; }
         if seg.start > curr_x {
-            let rect = vello::kurbo::Rect::new(curr_x, y_pos - size / 2.0, seg.start, y_pos + size / 2.0);
-            scene.fill(Fill::NonZero, transform, sbrush, None, &rect);
+            let rect = vello::kurbo::Rect::new(curr_x, y_pos - size / 2.0, seg.start.min(end_x), y_pos + size / 2.0);
+            scene.fill(Fill::NonZero, transform, brush, None, &rect);
         }
         curr_x = curr_x.max(seg.end);
     }
     if curr_x < end_x {
         let rect = vello::kurbo::Rect::new(curr_x, y_pos - size / 2.0, end_x, y_pos + size / 2.0);
-        scene.fill(Fill::NonZero, transform, sbrush, None, &rect);
+        scene.fill(Fill::NonZero, transform, brush, None, &rect);
     }
 }
 
 fn is_skipped(segments: &[SpoilerSegment], x: f64) -> bool {
-    segments.iter().any(|s| x >= s.start && x < s.end)
+    let idx = segments.partition_point(|s| s.start <= x);
+    idx > 0 && x < segments[idx - 1].end
 }
 
 fn draw_spoiler_tg(scene: &mut Scene,
@@ -366,24 +368,76 @@ fn draw_spoiler_tg(scene: &mut Scene,
                    opacity_mod: f32,
                    default_color: &Paint,
 ) {
+    const ALPHAS: [f32; 3] = [0.3, 0.6, 1.0];
     let metrics = run.metrics();
     let font_size = run.font_size();
     let baseline_y = (glyph_run.baseline() - metrics.ascent) as f64;
     let h = (metrics.ascent + metrics.descent) as f64;
+    let run_width = glyph_run.advance() as f64;
+
+
+    let window_start = glyph_run.offset() as f64;
+    let window_end = window_start + glyph_run.advance() as f64;
+
+    let mut tier_paths: [BezPath; 3] = Default::default();
+    let mut clip = BezPath::new();
+    let mut any = false;
 
     for seg in segments {
         let w = seg.end - seg.start;
-        emit_spoiler(scene,
-                     transform,
-                     seg.start,
-                     baseline_y,
-                     w, h,
-                     glyph_run,
-                     font_size,
-                     &seg.text_range,
-                     opacity_mod,
-                     default_color
-        );
+        if w <= 0.0 || h <= 0.0 { continue; }
+        
+        let draw_start = seg.start.max(window_start);
+        let draw_end = seg.end.min(window_end);
+        if draw_end <= draw_start { continue; }
+        
+        any = true;
+        clip.extend(KRect::new(draw_start, baseline_y, draw_end, baseline_y + h).path_elements(0.1));
+        
+        accumulate_spoiler_particles(&mut tier_paths, seg.start, baseline_y, w, h,
+                                     font_size as f64, seed_for(&seg.text_range));
+    }
+
+    if !any { return; }
+
+    let brush = default_color.to_brush(run_width, h);
+    for (i, path) in tier_paths.iter().enumerate() {
+        scene.push_layer(Fill::NonZero, BlendMode::default(), ALPHAS[i] * opacity_mod, transform, &clip);
+        scene.fill(Fill::NonZero, transform, &brush, None, path);
+        scene.pop_layer();
+    }
+}
+
+fn seed_for(text_range: &Range<usize>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text_range.start.hash(&mut hasher);
+    text_range.end.hash(&mut hasher);
+    hasher.finish()
+}
+
+// TODO: Replace with GPU instancing perhaps
+fn accumulate_spoiler_particles(
+    tier_paths: &mut [BezPath; 3],
+    x: f64, y: f64, w: f64, h: f64,
+    font_size: f64, seed: u64,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+
+    let mut rng = SmallRng::seed_from_u64(seed);
+    let char_width = font_size * 0.6;
+    let chars_in_run = (w / char_width).max(1.0);
+    let count = (chars_in_run * 30.0).min(500.0) as usize;
+    // Particle radius scales with font size:
+    // TG uses ~1.2-1.4dp for ~16sp text
+    let radius = (font_size / 16.0) * 0.7;
+
+    for _ in 0..count {
+        let px = x + rng.random::<f64>() * w;
+        let py = y + rng.random::<f64>() * h;
+        let tier_idx = rng.random_range(0usize..3);
+        tier_paths[tier_idx].extend(KCircle::new((px, py), radius).path_elements(0.1));
     }
 }
 
@@ -400,69 +454,6 @@ fn spoiled_spans<'a>(
         .peekable();
 
     iter.peek().is_some().then_some(iter)
-}
-
-fn emit_spoiler(
-    scene: &mut Scene,
-    transform: Affine,
-    x: f64, y: f64, w: f64, h: f64,
-    glyph_run: &GlyphRun<Paint>,
-    font_size: f32,
-    text_range: &Range<usize>,
-    opacity_mod: f32,
-    default_color: &Paint,
-) {
-    let mut hasher = DefaultHasher::new();
-    text_range.start.hash(&mut hasher);
-    text_range.end.hash(&mut hasher);
-    let seed = hasher.finish();
-    let run_width = glyph_run.advance() as f64;
-    let brush = default_color.to_brush(run_width, h);
-
-    draw_spoiler_particles(scene, transform, x, y, w, h, &brush, font_size as f64, seed, opacity_mod);
-}
-
-// TODO: Replace with GPU instancing perhaps
-fn draw_spoiler_particles(
-    scene: &mut Scene,
-    transform: Affine,
-    x: f64, y: f64, w: f64, h: f64,
-    brush: &Brush,
-    font_size: f64,
-    seed: u64,
-    opacity_mod: f32
-) {
-    if w <= 0.0 || h <= 0.0 {
-        return;
-    }
-
-    let mut rng = SmallRng::seed_from_u64(seed);
-    let alphas: [f32; 3] = [0.3, 0.6, 1.0];
-
-    let char_width = font_size * 0.6;
-    let chars_in_run = (w / char_width).max(1.0);
-    let count = (chars_in_run * 30.0).min(500.0) as usize;
-
-    // Particle radius scales with font size:
-    // TG uses ~1.2-1.4dp for ~16sp text
-    let radius = (font_size / 16.0) * 0.7;
-
-    let mut tier_paths: [BezPath; 3] = Default::default();
-    let clip_rect = KRect::new(x, y, x + w, y + h);
-
-    for _ in 0..count {
-        let px = x + rng.random::<f64>() * w;
-        let py = y + rng.random::<f64>() * h;
-        let tier_idx = rng.random_range(0usize..3);
-        tier_paths[tier_idx].extend(KCircle::new((px, py), radius).path_elements(0.1));
-    }
-
-    for (i, path) in tier_paths.iter().enumerate() {
-        scene.push_layer(Fill::NonZero, BlendMode::default(), alphas[i] * opacity_mod, transform,
-                         &clip_rect);
-        scene.fill(Fill::NonZero, transform, brush, None, path);
-        scene.pop_layer();
-    }
 }
 
 #[cfg(test)]

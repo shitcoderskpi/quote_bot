@@ -124,6 +124,22 @@ TESTS: dict[str, FakeMessage] = {
         header=make_header(),
         image_bytes=None,
     ),
+    "entities_in_spoiler": FakeMessage(
+        grad_id=2,
+        username="Nested Spoiler",
+        user_status=None,
+        user_role="member",
+        content="Hidden bold, italic, strikethrough, underline!",
+        entities=[
+            {"type": "spoiler", "offset": 0, "length": 46},
+            {"type": "bold", "offset": 7, "length": 4},
+            {"type": "italic", "offset": 13, "length": 6},
+            {"type": "strikethrough", "offset": 21, "length": 13},
+            {"type": "underline", "offset": 36, "length": 9},
+        ],
+        header=make_header(),
+        image_bytes=None,
+    ),
     "all_entities": FakeMessage(
         grad_id=4,
         username="All Entities",
