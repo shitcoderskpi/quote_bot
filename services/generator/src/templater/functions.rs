@@ -1,17 +1,18 @@
+use super::types::*;
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
 use crate::primitives::text::{RichText, SpoilerStyle, TextAlign};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as Base64Engine};
+use crate::templater::image::SteelImage;
+use crate::templater::types::TextMod::Weight;
+use std::sync::Arc;
+use steel::SteelErr;
+use steel::rerrs::ErrorKind;
 use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
-use std::sync::Arc;
-use steel::SteelErr;
 use taffy::prelude::*;
-use vello::peniko::ImageBrush;
-use crate::templater::types::TextMod::Weight;
-use super::types::*;
+use vello::peniko::{Color, ImageBrush};
 
 pub fn register_all(engine: &mut Engine) {
     engine.register_value("text-context", TextContext::default().into_steelval().unwrap());
@@ -160,21 +161,21 @@ fn fn_auto() -> SchemeDimension {
     SchemeDimension::Auto
 }
 
-fn fn_hex(s: String) -> Result<SchemeColor, String> {
+fn fn_hex(s: String) -> Result<SteelColor, String> {
     parse_hex_color(&s)
-        .map(SchemeColor)
+        .map(SteelColor)
         .ok_or_else(|| format!("hex: invalid hex color \"{}\"", s))
 }
 
-fn fn_rgb(r: isize, g: isize, b: isize) -> SchemeColor {
-    SchemeColor(vello::peniko::Color::from_rgb8(r as u8, g as u8, b as u8))
+fn fn_rgb(r: isize, g: isize, b: isize) -> SteelColor {
+    SteelColor(Color::from_rgb8(r as u8, g as u8, b as u8))
 }
 
-fn fn_rgba(r: isize, g: isize, b: isize, a: isize) -> SchemeColor {
-    SchemeColor(vello::peniko::Color::from_rgba8(r as u8, g as u8, b as u8, a as u8))
+fn fn_rgba(r: isize, g: isize, b: isize, a: isize) -> SteelColor {
+    SteelColor(Color::from_rgba8(r as u8, g as u8, b as u8, a as u8))
 }
 
-fn parse_hex_color(hex: &str) -> Option<vello::peniko::Color> {
+fn parse_hex_color(hex: &str) -> Option<Color> {
     let hex = hex.trim_start_matches('#');
     if hex.len() == 6 || hex.len() == 8 {
         let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
@@ -185,33 +186,33 @@ fn parse_hex_color(hex: &str) -> Option<vello::peniko::Color> {
         } else {
             255
         };
-        Some(vello::peniko::Color::from_rgba8(r, g, b, a))
+        Some(Color::from_rgba8(r, g, b, a))
     } else {
         None
     }
 }
-fn fn_solid(c: SchemeColor) -> SchemePaint {
-    SchemePaint(Paint::Solid(c.0))
+fn fn_solid(c: SteelColor) -> SteelPaint {
+    SteelPaint(Paint::Solid(c.0))
 }
 
-fn fn_angle(deg: SchemeNumber) -> SchemeAngle {
-    SchemeAngle(deg.0)
+fn fn_angle(deg: SchemeNumber) -> SteelAngle {
+    SteelAngle(deg.0)
 }
 
-fn fn_stop(pct: SchemeNumber, color: SchemeColor) -> SchemeStop {
-    SchemeStop {
+fn fn_stop(pct: SchemeNumber, color: SteelColor) -> SteelStop {
+    SteelStop {
         offset: (pct.0 / 100.0) as f32,
         color: color.0,
     }
 }
 
-fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
+fn fn_make_linear_gradient(args: SteelVal) -> Result<SteelPaint, SteelErr> {
     let list = steel_list_to_vec(&args)?;
 
-    if list.len() == 2 && SchemeColor::from_steelval(&list[0]).is_ok() && SchemeColor::from_steelval(&list[1]).is_ok() {
-        let top = SchemeColor::from_steelval(&list[0]).unwrap();
-        let bottom = SchemeColor::from_steelval(&list[1]).unwrap();
-        return Ok(SchemePaint(Paint::LinearGradient {
+    if list.len() == 2 && SteelColor::from_steelval(&list[0]).is_ok() && SteelColor::from_steelval(&list[1]).is_ok() {
+        let top = SteelColor::from_steelval(&list[0])?;
+        let bottom = SteelColor::from_steelval(&list[1])?;
+        return Ok(SteelPaint(Paint::LinearGradient {
             start: (0.0, 0.0),
             end: (0.0, 1.0),
             stops: vec![
@@ -219,6 +220,7 @@ fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
                 Stop { offset: 1.0, color: bottom.0 },
             ],
             extend: Default::default(),
+            alpha: 1.0,
         }));
     }
 
@@ -226,17 +228,23 @@ fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     let mut stops: Vec<Stop> = Vec::new();
 
     for item in &list {
-        if let Ok(a) = SchemeAngle::from_steelval(item) {
+        if let Ok(a) = SteelAngle::from_steelval(item) {
             angle_deg = a.0;
-        } else if let Ok(s) = SchemeStop::from_steelval(item) {
+        } else if let Ok(s) = SteelStop::from_steelval(item) {
             stops.push(Stop { offset: s.offset, color: s.color });
         } else {
-            return Err(format!("linear-gradient: unexpected argument: {:?}", item));
+            return Err(SteelErr::new(
+                ErrorKind::UnexpectedToken,
+                format!("linear-gradient: unexpected argument: {:?}", item)
+            ));
         }
     }
 
     if stops.len() < 2 {
-        return Err("linear-gradient: need exactly 2 colors OR at least 2 stops".to_string());
+        return Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            "linear-gradient: need exactly 2 colors OR at least 2 stops".to_string()
+        ));
     }
 
     let rad = (angle_deg - 90.0_f64).to_radians();
@@ -244,64 +252,67 @@ fn fn_make_linear_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     let start = (0.5 - dx / 2.0, 0.5 - dy / 2.0);
     let end = (0.5 + dx / 2.0, 0.5 + dy / 2.0);
 
-    Ok(SchemePaint(Paint::LinearGradient {
+    Ok(SteelPaint(Paint::LinearGradient {
         start,
         end,
         stops,
         extend: Default::default(),
+        alpha: 1.0,
     }))
 }
 
-fn fn_make_circle(args: SteelVal) -> Result<SchemeShapeKind, String> {
+fn fn_make_circle(args: SteelVal) -> Result<SteelShapeKind, SteelErr> {
     let list = steel_list_to_vec(&args)?;
     if list.is_empty() {
-        Ok(SchemeShapeKind::new(ShapeKind::Circle))
+        Ok(SteelShapeKind::new(ShapeKind::Circle))
     } else if list.len() == 1 {
-        let d = SchemeDimension::from_steelval(&list[0])
-            .map_err(|_| format!("circle: expected dimension, got {:?}", list[0]))?;
+        let d = SchemeDimension::from_steelval(&list[0])?;
         let v = d.to_f64() as f32;
-        Ok(SchemeShapeKind::with_size(ShapeKind::Circle, v, v))
+        Ok(SteelShapeKind::with_size(ShapeKind::Circle, v, v))
     } else if list.len() == 2 {
-        let w = SchemeDimension::from_steelval(&list[0]).map_err(|_| "circle: expected 1st arg to be dimension")?;
-        let h = SchemeDimension::from_steelval(&list[1]).map_err(|_| "circle: expected 2nd arg to be dimension")?;
-        Ok(SchemeShapeKind::with_size(ShapeKind::Circle, w.to_f64() as f32, h.to_f64() as f32))
+        let w = SchemeDimension::from_steelval(&list[0])?;
+        let h = SchemeDimension::from_steelval(&list[1])?;
+        Ok(SteelShapeKind::with_size(ShapeKind::Circle, w.to_f64() as f32, h.to_f64() as f32))
     } else {
-        Err(format!("circle: expected 0, 1, or 2 arguments, got {}", list.len()))
+        Err(SteelErr::new(ErrorKind::BadSyntax,
+            format!("circle: expected 0, 1, or 2 arguments, got {}", list.len())
+        ))
     }
 }
 
-fn fn_make_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
+fn fn_make_rect(args: SteelVal) -> Result<SteelShapeKind, SteelErr> {
     let list = steel_list_to_vec(&args)?;
     if list.is_empty() {
-        Ok(SchemeShapeKind::new(ShapeKind::Rect { corners: Corners::zero() }))
+        Ok(SteelShapeKind::new(ShapeKind::Rect { corners: Corners::zero() }))
     } else if list.len() == 1 {
-        let d = SchemeDimension::from_steelval(&list[0])
-            .map_err(|_| format!("rect: expected dimension, got {:?}", list[0]))?;
+        let d = SchemeDimension::from_steelval(&list[0])?;
         let v = d.to_f64() as f32;
-        Ok(SchemeShapeKind::with_size(ShapeKind::Rect { corners: Corners::zero() }, v, v))
+        Ok(SteelShapeKind::with_size(ShapeKind::Rect { corners: Corners::zero() }, v, v))
     } else if list.len() == 2 {
-        let w = SchemeDimension::from_steelval(&list[0]).map_err(|_| "rect: expected 1st arg to be dimension")?;
-        let h = SchemeDimension::from_steelval(&list[1]).map_err(|_| "rect: expected 2nd arg to be dimension")?;
-        Ok(SchemeShapeKind::with_size(ShapeKind::Rect { corners: Corners::zero() }, w.to_f64() as f32, h.to_f64() as f32))
+        let w = SchemeDimension::from_steelval(&list[0])?;
+        let h = SchemeDimension::from_steelval(&list[1])?;
+        Ok(SteelShapeKind::with_size(ShapeKind::Rect { corners: Corners::zero() }, w.to_f64() as f32, h.to_f64() as f32))
     } else {
-        Err(format!("rect: expected 0, 1, or 2 arguments, got {}", list.len()))
+        Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("rect: expected 0, 1, or 2 arguments, got {}", list.len())
+        ))
     }
 }
 
-fn fn_make_rounded_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
+fn fn_make_rounded_rect(args: SteelVal) -> Result<SteelShapeKind, SteelErr> {
     let list = steel_list_to_vec(&args)?;
     
     if list.len() == 1 {
-        let r = SchemeDimension::from_steelval(&list[0])
-            .map_err(|_| format!("rounded-rect: expected dimension, got {:?}", list[0]))?;
+        let r = SchemeDimension::from_steelval(&list[0])?;
         let v = r.to_f64();
-        Ok(SchemeShapeKind::new(ShapeKind::Rect { corners: Corners::all(v) }))
+        Ok(SteelShapeKind::new(ShapeKind::Rect { corners: Corners::all(v) }))
     } else if list.len() == 4 {
-        let tl = SchemeDimension::from_steelval(&list[0]).map_err(|_| "rounded-rect: expected 1st arg to be dimension")?;
-        let tr = SchemeDimension::from_steelval(&list[1]).map_err(|_| "rounded-rect: expected 2nd arg to be dimension")?;
-        let br = SchemeDimension::from_steelval(&list[2]).map_err(|_| "rounded-rect: expected 3rd arg to be dimension")?;
-        let bl = SchemeDimension::from_steelval(&list[3]).map_err(|_| "rounded-rect: expected 4th arg to be dimension")?;
-        Ok(SchemeShapeKind::new(ShapeKind::Rect {
+        let tl = SchemeDimension::from_steelval(&list[0])?;
+        let tr = SchemeDimension::from_steelval(&list[1])?;
+        let br = SchemeDimension::from_steelval(&list[2])?;
+        let bl = SchemeDimension::from_steelval(&list[3])?;
+        Ok(SteelShapeKind::new(ShapeKind::Rect {
             corners: Corners {
                 top_left: tl.to_f64(),
                 top_right: tr.to_f64(),
@@ -310,40 +321,45 @@ fn fn_make_rounded_rect(args: SteelVal) -> Result<SchemeShapeKind, String> {
             },
         }))
     } else {
-        Err(format!("rounded-rect: expected 1 or 4 arguments, got {}", list.len()))
+        Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("rounded-rect: expected 1 or 4 arguments, got {}", list.len())
+        ))
     }
 }
 
-fn fn_svg_path(d: String) -> SchemeShapeKind {
-    SchemeShapeKind::new(ShapeKind::Path { data: d })
+fn fn_svg_path(d: String) -> SteelShapeKind {
+    SteelShapeKind::new(ShapeKind::Path { data: d })
 }
 
-fn fn_fill(paint: SchemePaint) -> ShapeMod {
+fn fn_fill(paint: SteelPaint) -> ShapeMod {
     ShapeMod::Fill(paint.0)
 }
 
-fn fn_stroke(paint: SchemePaint, width: SchemeNumber) -> ShapeMod {
+fn fn_stroke(paint: SteelPaint, width: SchemeNumber) -> ShapeMod {
     ShapeMod::Stroke(Stroke { width: width.0, color: match paint.0 {
         Paint::Solid(c) => c,
-        _ => vello::peniko::Color::BLACK,
+        _ => Color::BLACK,
     }})
 }
 
-fn fn_direction(val: SteelVal) -> Result<StyleMod, String> {
+fn fn_direction(val: SteelVal) -> Result<StyleMod, SteelErr> {
     let s = symbol_str(&val, "direction")?;
     match s.as_str() {
         "row" => Ok(StyleMod::Direction(FlexDirection::Row)),
         "column" => Ok(StyleMod::Direction(FlexDirection::Column)),
         "row-reverse" => Ok(StyleMod::Direction(FlexDirection::RowReverse)),
         "column-reverse" => Ok(StyleMod::Direction(FlexDirection::ColumnReverse)),
-        _ => Err(format!(
+        _ => Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!(
             "direction: unknown value '{}', expected one of: row, column, row-reverse, column-reverse",
             s
-        )),
+        ))),
     }
 }
 
-fn fn_align_items(val: SteelVal) -> Result<StyleMod, String> {
+fn fn_align_items(val: SteelVal) -> Result<StyleMod, SteelErr> {
     let s = symbol_str(&val, "align-items")?;
     let ai = match s.as_str() {
         "start" | "flex-start" => Some(AlignItems::FLEX_START),
@@ -351,15 +367,17 @@ fn fn_align_items(val: SteelVal) -> Result<StyleMod, String> {
         "center" => Some(AlignItems::CENTER),
         "stretch" => Some(AlignItems::STRETCH),
         "baseline" => Some(AlignItems::BASELINE),
-        _ => return Err(format!(
+        _ => return Err(
+            SteelErr::new(ErrorKind::BadSyntax,
+            format!(
             "align-items: unknown value '{}', expected one of: start, end, center, stretch, baseline",
             s
-        )),
+        ))),
     };
     Ok(StyleMod::AlignItems(ai))
 }
 
-fn fn_justify_content(val: SteelVal) -> Result<StyleMod, String> {
+fn fn_justify_content(val: SteelVal) -> Result<StyleMod, SteelErr> {
     let s = symbol_str(&val, "justify-content")?;
     let jc = match s.as_str() {
         "start" | "flex-start" => Some(JustifyContent::FLEX_START),
@@ -368,29 +386,35 @@ fn fn_justify_content(val: SteelVal) -> Result<StyleMod, String> {
         "space-between" => Some(JustifyContent::SPACE_BETWEEN),
         "space-around" => Some(JustifyContent::SPACE_AROUND),
         "space-evenly" => Some(JustifyContent::SPACE_EVENLY),
-        _ => return Err(format!(
+        _ => return Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!(
             "justify-content: unknown value '{}', expected one of: start, end, center, space-between, space-around, space-evenly",
             s
-        )),
+        ))),
     };
     Ok(StyleMod::JustifyContent(jc))
 }
 
-fn fn_display(val: SteelVal) -> Result<StyleMod, String> {
+fn fn_display(val: SteelVal) -> Result<StyleMod, SteelErr> {
     let s = symbol_str(&val, "display")?;
     match s.as_str() {
         "flex" => Ok(StyleMod::Display(Display::Flex)),
         "none" => Ok(StyleMod::Display(Display::None)),
-        _ => Err(format!("display: unknown value '{}', expected: flex, none", s)),
+        _ => Err(SteelErr::new(ErrorKind::BadSyntax,
+            format!("display: unknown value '{}', expected: flex, none", s)
+        )),
     }
 }
 
-fn fn_position(val: SteelVal) -> Result<StyleMod, String> {
+fn fn_position(val: SteelVal) -> Result<StyleMod, SteelErr> {
     let s = symbol_str(&val, "position")?;
     match s.as_str() {
         "absolute" => Ok(StyleMod::Position(Position::Absolute)),
         "relative" => Ok(StyleMod::Position(Position::Relative)),
-        _ => Err(format!("position: unknown value '{}', expected: absolute, relative", s)),
+        _ => Err(SteelErr::new(ErrorKind::BadSyntax,
+            format!("position: unknown value '{}', expected: absolute, relative", s)
+        )),
     }
 }
 
@@ -401,20 +425,22 @@ fn fn_max_height(d: SchemeDimension) -> StyleMod { StyleMod::MaxHeight(d) }
 fn fn_min_width(d: SchemeDimension) -> StyleMod { StyleMod::MinWidth(d) }
 fn fn_min_height(d: SchemeDimension) -> StyleMod { StyleMod::MinHeight(d) }
 
-fn fn_make_padding(args: SteelVal) -> Result<StyleMod, String> {
+fn fn_make_padding(args: SteelVal) -> Result<StyleMod, SteelErr> {
     let list = steel_list_to_vec(&args)?;
     if list.len() == 1 {
-        let d = SchemeDimension::from_steelval(&list[0])
-            .map_err(|_| format!("padding: expected dimension, got {:?}", list[0]))?;
+        let d = SchemeDimension::from_steelval(&list[0])?;
         Ok(StyleMod::PaddingUniform(d))
     } else if list.len() == 4 {
-        let t = SchemeDimension::from_steelval(&list[0]).map_err(|_| "padding: expected 1st arg to be dimension")?;
-        let r = SchemeDimension::from_steelval(&list[1]).map_err(|_| "padding: expected 2nd arg to be dimension")?;
-        let b = SchemeDimension::from_steelval(&list[2]).map_err(|_| "padding: expected 3rd arg to be dimension")?;
-        let l = SchemeDimension::from_steelval(&list[3]).map_err(|_| "padding: expected 4th arg to be dimension")?;
+        let t = SchemeDimension::from_steelval(&list[0])?;
+        let r = SchemeDimension::from_steelval(&list[1])?;
+        let b = SchemeDimension::from_steelval(&list[2])?;
+        let l = SchemeDimension::from_steelval(&list[3])?;
         Ok(StyleMod::PaddingTRBL(t, r, b, l))
     } else {
-        Err(format!("padding: expected 1 or 4 arguments, got {}", list.len()))
+        Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("padding: expected 1 or 4 arguments, got {}", list.len())
+        ))
     }
 }
 fn fn_padding_xy(h: SchemeDimension, v: SchemeDimension) -> StyleMod { StyleMod::PaddingXY(h, v) }
@@ -433,60 +459,95 @@ fn fn_opacity(v: SchemeNumber) -> StyleMod { StyleMod::Opacity(v.0 as f32) }
 fn fn_rotate(v: SchemeNumber) -> StyleMod { StyleMod::Rotate(v.0) }
 
 fn fn_size(d: SchemeDimension) -> TextMod { TextMod::Size(d) }
-fn fn_color(c: SchemeColor) -> TextMod { TextMod::Color(c.0) }
+fn fn_color(val: SteelVal) -> Result<TextMod, SteelErr> {
+    if let Ok(c) = SteelColor::from_steelval(&val) {
+        Ok(TextMod::Brush(Paint::solid(c.0)))
+    } else if let Ok(p) = SteelPaint::from_steelval(&val) {
+        Ok(TextMod::Brush(p.0))
+    } else {
+        Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("color: expected color or paint, got {:?}", val)
+        ))
+    }
+}
 fn fn_family(s: String) -> TextMod { TextMod::Family(s) }
 fn fn_weight(v: SchemeNumber) -> TextMod { Weight(parley::FontWeight::new(v.0 as f32)) }
 fn fn_italic() -> TextMod { TextMod::Italic }
-fn fn_link_color(c: SchemeColor) -> TextMod { TextMod::LinkColor(c.0) }
+fn fn_link_color(val: SteelVal) -> Result<TextMod, String> {
+    if let Ok(c) = SteelColor::from_steelval(&val) {
+        Ok(TextMod::LinkBrush(Paint::solid(c.0)))
+    } else if let Ok(p) = SteelPaint::from_steelval(&val) {
+        Ok(TextMod::LinkBrush(p.0))
+    } else {
+        Err(format!("link-color: expected color or paint, got {:?}", val))
+    }
+}
 
-fn fn_code_color(c: SchemeColor) -> TextMod {TextMod::CodeColor(c.0) }
+fn fn_code_color(val: SteelVal) -> Result<TextMod, String> {
+    if let Ok(c) = SteelColor::from_steelval(&val) {
+        Ok(TextMod::CodeBrush(Paint::solid(c.0)))
+    } else if let Ok(p) = SteelPaint::from_steelval(&val) {
+        Ok(TextMod::CodeBrush(p.0))
+    } else {
+        Err(format!("code-color: expected color or paint, got {:?}", val))
+    }
+}
 fn fn_code_family(s: String) -> TextMod { TextMod::CodeFamily(s) }
 fn fn_line_height(v: SchemeNumber) -> TextMod { TextMod::LineHeight(v.0 as f32) }
 fn fn_wrap(b: bool) -> TextMod { TextMod::Wrap(b) }
 
-fn fn_text_align(val: SteelVal) -> Result<TextMod, String> {
+fn fn_text_align(val: SteelVal) -> Result<TextMod, SteelErr> {
     let s = symbol_str(&val, "align")?;
     match s.as_str() {
         "start" | "left" => Ok(TextMod::Align(TextAlign::Start)),
         "center" => Ok(TextMod::Align(TextAlign::Center)),
         "end" | "right" => Ok(TextMod::Align(TextAlign::End)),
         "justify" => Ok(TextMod::Align(TextAlign::Justify)),
-        _ => Err(format!("align: unknown value '{}', expected: start, center, end, justify", s)),
+        _ => Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("align: unknown value '{}', expected: start, center, end, justify", s)
+        )),
     }
 }
 
-fn fn_overflow_wrap(val: SteelVal) -> Result<TextMod, String> {
+fn fn_overflow_wrap(val: SteelVal) -> Result<TextMod, SteelErr> {
     let s = symbol_str(&val, "overflow-wrap")?;
     match s.as_str() {
         "normal" => Ok(TextMod::OverflowWrap(parley::OverflowWrap::Normal)),
         "anywhere" => Ok(TextMod::OverflowWrap(parley::OverflowWrap::Anywhere)),
         "break-word" => Ok(TextMod::OverflowWrap(parley::OverflowWrap::BreakWord)),
-        _ => Err(format!("overflow-wrap: unknown value '{}', expected: normal, anywhere, break-word", s)),
+        _ => Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("overflow-wrap: unknown value '{}', expected: normal, anywhere, break-word", s)
+        )),
     }
 }
 
-fn fn_spoiler(val: SteelVal) -> Result<TextMod, String> {
+fn fn_spoiler(val: SteelVal) -> Result<TextMod, SteelErr> {
     let s = symbol_str(&val, "spoiler")?;
     match s.as_str() {
         "none" => Ok(TextMod::SpoilerStyle(SpoilerStyle::None)),
         "tg-masked" => Ok(TextMod::SpoilerStyle(SpoilerStyle::TgMasked)),
         "tg-overlay" => Ok(TextMod::SpoilerStyle(SpoilerStyle::TgOverlay)),
         "faded" => Ok(TextMod::SpoilerStyle(SpoilerStyle::Faded)),
-        _ => Err(format!("spoiler: unknown style '{}', expected: tg-masked, tg-overlay, transparent", s)),
+        _ => Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("spoiler: unknown style '{}', expected: tg-masked, tg-overlay, transparent", s)
+        )),
     }
 }
 
-fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, String> {
+fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, SteelErr> {
     let list = steel_list_to_vec(&mods)?;
     let mut style = Style::default();
     for item in &list {
-        let m = StyleMod::from_steelval(item)
-            .map_err(|e| format!("style: expected style modifier, got {:?} ({})", item, e))?;
+        let m = StyleMod::from_steelval(item)?;
         m.apply(&mut style);
     }
     Ok(SchemeStyle(style))
 }
-fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
+fn fn_make_node(args: SteelVal) -> Result<SchemeNode, SteelErr> {
     let list = steel_list_to_vec(&args)?;
     let mut style = Style::default();
     let mut children: Vec<Node> = Vec::new();
@@ -501,7 +562,9 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
         } else if is_void_or_empty(item) {
             continue;
         } else {
-            return Err(format!("node: unexpected argument: {:?}", item));
+            return Err(SteelErr::new(ErrorKind::BadSyntax,
+                format!("node: unexpected argument: {:?}", item)
+            ));
         }
     }
 
@@ -522,31 +585,27 @@ pub(crate) fn fn_make_text(
     let text_str = match content {
         SteelVal::StringV(s) => s.to_string(),
         other => return Err(SteelErr::new(
-            steel::rerrs::ErrorKind::TypeMismatch,
+            ErrorKind::TypeMismatch,
             format!("text: first argument must be a string, got {:?}", other)
         )),
     };
 
-    let mod_list = steel_list_to_vec(&mods).map_err(|e| SteelErr::new(steel::rerrs::ErrorKind::TypeMismatch, e))?;
+    let mod_list = steel_list_to_vec(&mods).map_err(|e| SteelErr::new(ErrorKind::TypeMismatch, e.to_string()))?;
     let mut rich = RichText::plain(&text_str);
 
-    let mut link_color = vello::peniko::Color::from_rgb8(80, 150, 240);
+    let mut link_brush = Paint::solid(Color::BLACK);
     let mut code_family = "monospace".to_string();
-    let mut code_color = None;
+    let mut code_brush = Paint::solid(Color::BLACK);
 
     for item in &mod_list {
-        let m = TextMod::from_steelval(item)
-            .map_err(|e| SteelErr::new(
-                steel::rerrs::ErrorKind::TypeMismatch,
-                format!("text: expected text modifier, got {:?} ({})", item, e)
-            ))?;
+        let mut m = TextMod::from_steelval(item)?;
             
-        if let TextMod::LinkColor(c) = m {
-            link_color = c;
+        if let TextMod::LinkBrush(c) =  &m {
+            link_brush = c.clone();
         } else if let TextMod::CodeFamily(f) = &m {
             code_family = f.clone();
-        } else if let TextMod::CodeColor(c) = m {
-            code_color = Some(c);
+        } else if let TextMod::CodeBrush(c) = &m {
+            code_brush = c.clone();
         }
         
         m.apply(&mut rich);
@@ -554,9 +613,9 @@ pub(crate) fn fn_make_text(
     
     if let Some(base_offset) = rich.text.find(&ctx.content) {
         for ent in ctx.entities {
-            let t = ent.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            let offset = base_offset + ent.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let length = ent.get("length").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let t = ent.r#type.as_str();
+            let offset = base_offset + ent.offset as usize;
+            let length = ent.length as usize;
             
             let mut span = crate::primitives::text::Span::new(offset..(offset + length));
             match t {
@@ -566,17 +625,15 @@ pub(crate) fn fn_make_text(
                 "strikethrough" => span.strikethrough = true,
                 "code" | "pre" => {
                     span.font_family = Some(code_family.clone());
-                    if let Some(c) = code_color {
-                        span.color = Some(c);
-                    }
+                    span.paint = Some(code_brush.clone());
                 },
                 "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
                 "phone_number" | "text_mention" => {
-                    span.color = Some(link_color);
+                    span.paint = Some(link_brush.clone());
                     span.underline = true;
                 },
                 "bot_command" => {
-                    span.color = Some(link_color);
+                    span.paint = Some(link_brush.clone());
                 }
                 "spoiler" => {
                     span.spoiler = true;
@@ -590,15 +647,14 @@ pub(crate) fn fn_make_text(
     Ok(SchemeRichText(rich))
 }
 
-fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, String> {
+fn fn_make_shape(kind: SteelShapeKind, mods: SteelVal) -> Result<SchemeNode, SteelErr> {
     let mod_list = steel_list_to_vec(&mods)?;
 
     let mut fill: Option<Paint> = None;
     let mut stroke: Option<Stroke> = None;
 
     for item in &mod_list {
-        let m = ShapeMod::from_steelval(item)
-            .map_err(|e| format!("shape: expected fill or stroke modifier, got {:?} ({})", item, e))?;
+        let m = ShapeMod::from_steelval(item)?;
         match m {
             ShapeMod::Fill(p) => fill = Some(p),
             ShapeMod::Stroke(s) => stroke = Some(s),
@@ -611,17 +667,21 @@ fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, St
     }))
 }
 
-fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
-    let b64_str = match &data {
-        SteelVal::StringV(s) => s.to_string(),
-        other => return Err(format!("image: first argument must be a base64 string, got {:?}", other)),
-    };
+fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, SteelErr> {
+    let image = SteelImage::from_steelval(data)?;
 
-    let bytes = BASE64_STANDARD.decode(&b64_str)
-        .map_err(|e| format!("image: invalid base64: {}", e))?;
+    if image.is_empty() {
+        return Ok(SchemeNode(Node {
+            style: Style::default(),
+            content: Content::Group(vec![]),
+        }));
+    }
 
-    let img = image::load_from_memory(&bytes)
-        .map_err(|e| format!("image: failed to decode image: {}", e))?;
+    let img = image::load_from_memory(image.as_slice())
+        .map_err(|e| SteelErr::new(
+            ErrorKind::Generic,
+            format!("image: failed to decode image: {}", e)
+        ))?;
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
 
@@ -636,8 +696,7 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
 
     let arg_list = steel_list_to_vec(&args)?;
     let clip_shape = if let Some(item) = arg_list.first() {
-        Some(SchemeShapeKind::from_steelval(item)
-            .map_err(|e| format!("image: expected clip shape, got {:?} ({})", item, e))?)
+        Some(SteelShapeKind::from_steelval(item)?)
     } else {
         None
     };
@@ -654,16 +713,16 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
     Ok(SchemeNode(node))
 }
 
-fn fn_make_radial_gradient(args: SteelVal) -> Result<SchemePaint, String> {
+fn fn_make_radial_gradient(args: SteelVal) -> Result<SteelPaint, SteelErr> {
     let list = steel_list_to_vec(&args)?;
 
     if list.len() == 2
-        && SchemeColor::from_steelval(&list[0]).is_ok()
-        && SchemeColor::from_steelval(&list[1]).is_ok()
+        && SteelColor::from_steelval(&list[0]).is_ok()
+        && SteelColor::from_steelval(&list[1]).is_ok()
     {
-        let inner = SchemeColor::from_steelval(&list[0]).unwrap();
-        let outer = SchemeColor::from_steelval(&list[1]).unwrap();
-        return Ok(SchemePaint(Paint::RadialGradient {
+        let inner = SteelColor::from_steelval(&list[0])?;
+        let outer = SteelColor::from_steelval(&list[1])?;
+        return Ok(SteelPaint(Paint::RadialGradient {
             center: (0.5, 0.5),
             radius: 0.5,
             stops: vec![
@@ -671,43 +730,53 @@ fn fn_make_radial_gradient(args: SteelVal) -> Result<SchemePaint, String> {
                 Stop { offset: 1.0, color: outer.0 },
             ],
             extend: Default::default(),
+            alpha: 1.0,
         }));
     }
 
     let mut stops: Vec<Stop> = Vec::new();
     for item in &list {
-        if let Ok(s) = SchemeStop::from_steelval(item) {
+        if let Ok(s) = SteelStop::from_steelval(item) {
             stops.push(Stop { offset: s.offset, color: s.color });
         } else {
-            return Err(format!("radial-gradient: unexpected argument: {:?}", item));
+            return Err(SteelErr::new(ErrorKind::BadSyntax,
+                format!("radial-gradient: unexpected argument: {:?}", item)
+            ));
         }
     }
 
     if stops.len() < 2 {
-        return Err("radial-gradient: need exactly 2 colors OR at least 2 stops".to_string());
+        return Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            "radial-gradient: need exactly 2 colors OR at least 2 stops".to_string()
+        ));
     }
 
-    Ok(SchemePaint(Paint::RadialGradient {
+    Ok(SteelPaint(Paint::RadialGradient {
         center: (0.5, 0.5),
         radius: 0.5,
         stops,
         extend: Default::default(),
+        alpha: 1.0,
     }))
 }
 
-fn fn_make_sweep_gradient(args: SteelVal) -> Result<SchemePaint, String> {
+fn fn_make_sweep_gradient(args: SteelVal) -> Result<SteelPaint, SteelErr> {
     let list = steel_list_to_vec(&args)?;
 
     let mut angles: Vec<f32> = Vec::new();
     let mut stops: Vec<Stop> = Vec::new();
 
     for item in &list {
-        if let Ok(a) = SchemeAngle::from_steelval(item) {
+        if let Ok(a) = SteelAngle::from_steelval(item) {
             angles.push(a.0 as f32);
-        } else if let Ok(s) = SchemeStop::from_steelval(item) {
+        } else if let Ok(s) = SteelStop::from_steelval(item) {
             stops.push(Stop { offset: s.offset, color: s.color });
         } else {
-            return Err(format!("sweep-gradient: unexpected argument: {:?}", item));
+            return Err(SteelErr::new(
+                ErrorKind::BadSyntax,
+                format!("sweep-gradient: unexpected argument: {:?}", item)
+            ));
         }
     }
 
@@ -715,27 +784,34 @@ fn fn_make_sweep_gradient(args: SteelVal) -> Result<SchemePaint, String> {
     let end_angle = angles.get(1).copied().unwrap_or(360.0);
 
     if stops.len() < 2 {
-        return Err("sweep-gradient: need at least 2 stops".to_string());
+        return Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            "sweep-gradient: need at least 2 stops".to_string()
+        ));
     }
 
-    Ok(SchemePaint(Paint::SweepGradient {
+    Ok(SteelPaint(Paint::SweepGradient {
         center: (0.5, 0.5),
         start_angle,
         end_angle,
         stops,
         extend: Default::default(),
+        alpha: 1.0,
     }))
 }
 
-fn symbol_str(val: &SteelVal, fn_name: &str) -> Result<String, String> {
+fn symbol_str(val: &SteelVal, fn_name: &str) -> Result<String, SteelErr> {
     match val {
         SteelVal::SymbolV(s) => Ok(s.to_string()),
         SteelVal::StringV(s) => Ok(s.to_string()),
-        _ => Err(format!("{}: expected a symbol (e.g., 'row), got {:?}", fn_name, val)),
+        _ => Err(SteelErr::new(
+            ErrorKind::BadSyntax,
+            format!("{}: expected a symbol (e.g., 'row), got {:?}", fn_name, val)
+        )),
     }
 }
 
-fn steel_list_to_vec(val: &SteelVal) -> Result<Vec<SteelVal>, String> {
+fn steel_list_to_vec(val: &SteelVal) -> Result<Vec<SteelVal>, SteelErr> {
     match val {
         SteelVal::ListV(l) => Ok(l.iter().cloned().collect()),
         SteelVal::Void => Ok(Vec::new()),
@@ -743,7 +819,10 @@ fn steel_list_to_vec(val: &SteelVal) -> Result<Vec<SteelVal>, String> {
             if is_void_or_empty(val) {
                 Ok(Vec::new())
             } else {
-                Err(format!("expected a list, got {:?}", val))
+                Err(SteelErr::new(
+                    ErrorKind::BadSyntax,
+                    format!("expected a list, got {:?}", val)
+                ))
             }
         }
     }
@@ -758,6 +837,7 @@ fn is_void_or_empty(val: &SteelVal) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::quote::Entity;
     use steel::rvals::IntoSteelVal;
 
     fn epsilon() -> f32 {
@@ -767,25 +847,25 @@ mod tests {
     #[test]
     fn hex_6_char_no_hash() {
         let c = parse_hex_color("FF0000").unwrap();
-        assert_eq!(c, vello::peniko::Color::from_rgba8(255, 0, 0, 255));
+        assert_eq!(c, Color::from_rgba8(255, 0, 0, 255));
     }
 
     #[test]
     fn hex_6_char_with_hash() {
         let c = parse_hex_color("#00FF00").unwrap();
-        assert_eq!(c, vello::peniko::Color::from_rgba8(0, 255, 0, 255));
+        assert_eq!(c, Color::from_rgba8(0, 255, 0, 255));
     }
 
     #[test]
     fn hex_8_char_with_alpha() {
         let c = parse_hex_color("#0000FF80").unwrap();
-        assert_eq!(c, vello::peniko::Color::from_rgba8(0, 0, 255, 128));
+        assert_eq!(c, Color::from_rgba8(0, 0, 255, 128));
     }
 
     #[test]
     fn hex_8_char_no_hash() {
         let c = parse_hex_color("AABBCCDD").unwrap();
-        assert_eq!(c, vello::peniko::Color::from_rgba8(0xAA, 0xBB, 0xCC, 0xDD));
+        assert_eq!(c, Color::from_rgba8(0xAA, 0xBB, 0xCC, 0xDD));
     }
 
     #[test]
@@ -876,7 +956,7 @@ mod tests {
 
     #[test]
     fn solid_wraps_color() {
-        let c = SchemeColor(vello::peniko::Color::BLACK);
+        let c = SteelColor(Color::BLACK);
         let p = fn_solid(c);
         assert!(matches!(p.0, Paint::Solid(_)));
     }
@@ -889,25 +969,25 @@ mod tests {
 
     #[test]
     fn stop_normalizes_offset() {
-        let s = fn_stop(SchemeNumber(50.0), SchemeColor(vello::peniko::Color::BLACK));
+        let s = fn_stop(SchemeNumber(50.0), SteelColor(Color::BLACK));
         assert!((s.offset - 0.5).abs() < epsilon());
     }
 
     #[test]
     fn fill_creates_shape_mod() {
-        let p = SchemePaint(Paint::solid(vello::peniko::Color::BLACK));
+        let p = SteelPaint(Paint::solid(Color::BLACK));
         let m = fn_fill(p);
         assert!(matches!(m, ShapeMod::Fill(_)));
     }
 
     #[test]
     fn stroke_creates_shape_mod() {
-        let p = SchemePaint(Paint::solid(vello::peniko::Color::WHITE));
+        let p = SteelPaint(Paint::solid(Color::WHITE));
         let m = fn_stroke(p, SchemeNumber(3.0));
         match m {
             ShapeMod::Stroke(s) => {
                 assert_eq!(s.width, 3.0);
-                assert_eq!(s.color, vello::peniko::Color::WHITE);
+                assert_eq!(s.color, Color::WHITE);
             }
             _ => panic!("Expected Stroke"),
         }
@@ -915,15 +995,16 @@ mod tests {
 
     #[test]
     fn stroke_gradient_paint_falls_back_to_black() {
-        let p = SchemePaint(Paint::LinearGradient {
+        let p = SteelPaint(Paint::LinearGradient {
             start: (0.0, 0.0),
             end: (1.0, 1.0),
             stops: vec![],
             extend: Default::default(),
+            alpha: 1.0,
         });
         let m = fn_stroke(p, SchemeNumber(1.0));
         match m {
-            ShapeMod::Stroke(s) => assert_eq!(s.color, vello::peniko::Color::BLACK),
+            ShapeMod::Stroke(s) => assert_eq!(s.color, Color::BLACK),
             _ => panic!("Expected Stroke"),
         }
     }
@@ -956,8 +1037,8 @@ mod tests {
 
     #[test]
     fn color_fn() {
-        let m = fn_color(SchemeColor(vello::peniko::Color::WHITE));
-        assert!(matches!(m, TextMod::Color(_)));
+        let m = fn_color(SteelColor(Color::WHITE).into_steelval().unwrap());
+        assert!(matches!(m, Ok(TextMod::Brush(_))));
     }
 
     #[test]
@@ -970,7 +1051,7 @@ mod tests {
     fn weight_fn() {
         let m = fn_weight(SchemeNumber(700.0));
         match m {
-            TextMod::Weight(w) => assert_eq!(w, parley::FontWeight::new(700.0)),
+            Weight(w) => assert_eq!(w, parley::FontWeight::new(700.0)),
             _ => panic!("Expected Weight"),
         }
     }
@@ -1005,19 +1086,19 @@ mod tests {
     #[test]
     fn rgb_creates_color() {
         let c = fn_rgb(255, 128, 0);
-        assert_eq!(c.0, vello::peniko::Color::from_rgb8(255, 128, 0));
+        assert_eq!(c.0, Color::from_rgb8(255, 128, 0));
     }
 
     #[test]
     fn rgba_creates_color() {
         let c = fn_rgba(10, 20, 30, 128);
-        assert_eq!(c.0, vello::peniko::Color::from_rgba8(10, 20, 30, 128));
+        assert_eq!(c.0, Color::from_rgba8(10, 20, 30, 128));
     }
 
     #[test]
     fn fn_hex_valid() {
         let c = fn_hex("#FF0000".to_string()).unwrap();
-        assert_eq!(c.0, vello::peniko::Color::from_rgba8(255, 0, 0, 255));
+        assert_eq!(c.0, Color::from_rgba8(255, 0, 0, 255));
     }
 
     #[test]
@@ -1031,7 +1112,7 @@ mod tests {
     }
 
     fn steel_stop(pct: f64, r: u8, g: u8, b: u8) -> SteelVal {
-        let stop = fn_stop(SchemeNumber(pct), SchemeColor(vello::peniko::Color::from_rgb8(r, g, b)));
+        let stop = fn_stop(SchemeNumber(pct), SteelColor(Color::from_rgb8(r, g, b)));
         stop.into_steelval().unwrap()
     }
 
@@ -1360,8 +1441,8 @@ mod tests {
 
     #[test]
     fn link_color_fn() {
-        let m = fn_link_color(SchemeColor(vello::peniko::Color::WHITE));
-        assert!(matches!(m, TextMod::LinkColor(_)));
+        let m = fn_link_color(SteelColor(Color::WHITE).into_steelval().unwrap());
+        assert!(matches!(m, Ok(TextMod::LinkBrush(_))));
     }
 
     #[test]
@@ -1469,7 +1550,7 @@ mod tests {
     #[test]
     fn make_text_with_mods() {
         let content = SteelVal::StringV("styled".into());
-        let bold = TextMod::Weight(parley::FontWeight::BOLD);
+        let bold = Weight(parley::FontWeight::BOLD);
         let mods = make_steel_list(vec![bold.into_steelval().unwrap()]);
         let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
         assert_eq!(result.0.default_weight, parley::FontWeight::BOLD);
@@ -1478,7 +1559,7 @@ mod tests {
     #[test]
     fn make_text_with_link_color_and_code_family() {
         let content = SteelVal::StringV("links".into());
-        let lc = TextMod::LinkColor(vello::peniko::Color::WHITE);
+        let lc = TextMod::LinkBrush(Paint::solid(Color::WHITE));
         let cf = TextMod::CodeFamily("Fira Code".into());
         let mods = make_steel_list(vec![
             lc.into_steelval().unwrap(),
@@ -1498,14 +1579,14 @@ mod tests {
         let content = SteelVal::StringV(text.into());
         let mods = make_steel_list(vec![]);
         let entities = vec![
-            serde_json::json!({"type": "bold", "offset": 6, "length": 4}),
-            serde_json::json!({"type": "italic", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "underline", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "strikethrough", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "code", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "text_link", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "bot_command", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "unknown_type", "offset": 0, "length": 5}),
+            Entity { r#type: "bold".to_string(), offset: 6, length: 4 },
+            Entity { r#type: "italic".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "underline".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "code".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "text_link".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
         ];
         let result = fn_make_text(
             content, mods,
@@ -1519,8 +1600,8 @@ mod tests {
 
     #[test]
     fn make_shape_with_fill() {
-        let kind = SchemeShapeKind::new(ShapeKind::Circle);
-        let fill_mod = ShapeMod::Fill(Paint::solid(vello::peniko::Color::BLACK));
+        let kind = SteelShapeKind::new(ShapeKind::Circle);
+        let fill_mod = ShapeMod::Fill(Paint::solid(Color::BLACK));
         let mods = make_steel_list(vec![fill_mod.into_steelval().unwrap()]);
         let result = fn_make_shape(kind, mods).unwrap();
         assert!(matches!(result.0.content, Content::Shape { ref fill, .. } if fill.is_some()));
@@ -1528,10 +1609,10 @@ mod tests {
 
     #[test]
     fn make_shape_with_stroke() {
-        let kind = SchemeShapeKind::new(ShapeKind::Circle);
+        let kind = SteelShapeKind::new(ShapeKind::Circle);
         let stroke_mod = ShapeMod::Stroke(Stroke {
             width: 3.0,
-            color: vello::peniko::Color::WHITE,
+            color: Color::WHITE,
         });
         let mods = make_steel_list(vec![stroke_mod.into_steelval().unwrap()]);
         let result = fn_make_shape(kind, mods).unwrap();
@@ -1543,9 +1624,8 @@ mod tests {
         let mut buf = std::io::Cursor::new(Vec::new());
         let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
-        let b64 = BASE64_STANDARD.encode(buf.into_inner());
 
-        let data = SteelVal::StringV(b64.into());
+        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
         let args = make_steel_list(vec![]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { .. }));
@@ -1556,10 +1636,9 @@ mod tests {
         let mut buf = std::io::Cursor::new(Vec::new());
         let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
-        let b64 = BASE64_STANDARD.encode(buf.into_inner());
 
-        let clip = SchemeShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
-        let data = SteelVal::StringV(b64.into());
+        let clip = SteelShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
+        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
         let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));

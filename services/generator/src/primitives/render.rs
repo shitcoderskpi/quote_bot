@@ -1,5 +1,7 @@
 use crate::primitives::Viewport;
 use crate::primitives::node::{Content, Node};
+use crate::primitives::paint::Paint;
+use crate::primitives::spoiler::{SpoilerSegment, spoiler_segments};
 use crate::primitives::text::{Span, SpoilerStyle};
 use parley::layout::{Glyph as ParleyGlyph, PositionedLayoutItem};
 use parley::{FontContext, GlyphRun, LayoutContext, Run};
@@ -8,17 +10,15 @@ use rand::{RngExt, SeedableRng};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
-use taffy::TaffyError;
-use taffy::prelude::*;
+use taffy::{AvailableSpace, NodeId, Size, TaffyError, TaffyTree};
 use vello::Glyph;
 use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Circle as KCircle, Rect as KRect, Shape, Stroke as KStroke};
-use vello::peniko::{BlendMode, Brush, Color, Fill, ImageBrush};
-use crate::primitives::spoiler::{SpoilerSegment, spoiler_segments};
+use vello::peniko::{BlendMode, Brush, Fill, ImageBrush};
 
 pub struct Renderer {
     font_cx: FontContext,
-    layout_cx: LayoutContext<Brush>,
+    layout_cx: LayoutContext<Paint>,
     taffy: TaffyTree<Content>,
     root_id: Option<NodeId>,
 }
@@ -66,7 +66,7 @@ impl Renderer {
     }
 
     fn measure(font_cx: &mut FontContext,
-               layout_cx: &mut LayoutContext<Brush>,
+               layout_cx: &mut LayoutContext<Paint>,
                ctx: Option<&mut Content>,
                known_dims: Size<Option<f32>>,
                avail_space: Size<AvailableSpace>) -> Size<f32> {
@@ -119,7 +119,14 @@ impl Renderer {
         }
     }
 
-    fn render_taffy_tree(&mut self, scene: &mut Scene, id: NodeId, node: &Node, parent_transform: Affine, viewport: Viewport, font_size: f64) {
+    fn render_taffy_tree(&mut self,
+                         scene: &mut Scene,
+                         id: NodeId,
+                         node: &Node,
+                         parent_transform: Affine,
+                         viewport: Viewport,
+                         font_size: f64
+    ) {
         let layout = self.taffy.layout(id).unwrap();
 
         let x = layout.location.x as f64;
@@ -152,7 +159,7 @@ impl Renderer {
             }
             Content::Text(rich) => {
                 let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w));
-                draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style);
+                draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style, &rich.default_color);
             }
             Content::Image { image, clip } => {
                 let clip_shape = clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.01));
@@ -186,46 +193,85 @@ fn cover_fit_transform(image: &ImageBrush, box_w: f64, box_h: f64) -> Affine {
 
 fn draw_text_layout(scene: &mut Scene,
                     transform: Affine,
-                    layout: &parley::Layout<Brush>,
+                    layout: &parley::Layout<Paint>,
                     spans: &[Span],
                     spoiler_style: SpoilerStyle,
+                    default_color: &Paint,
 ) {
+    let mut pending: Vec<GlyphRun<Paint>> = Vec::new();
     for line in layout.lines() {
+        pending.clear();
+        let mut pending_run_idx: Option<usize> = None;
+
         for item in line.items() {
-            if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
-                let run = glyph_run.run();
-                let text_range = run.text_range();
-
-                let segments = spoiled_spans(&text_range, spans)
-                    .map(|spans_iter| spoiler_segments(&glyph_run, run, spans_iter))
-                    .unwrap_or_default();
-
-                if !segments.is_empty() {
-                    match spoiler_style {
-                        SpoilerStyle::TgMasked =>{
-                            draw_text(scene, transform, &glyph_run, run, &segments);
-                            draw_spoiler_tg(scene, transform, &glyph_run, run, &segments, 1.0);
-                        }
-                        SpoilerStyle::TgOverlay =>{
-                            draw_text(scene, transform, &glyph_run, run, &[]);
-                            draw_spoiler_tg(scene, transform, &glyph_run, run, &segments, 0.7);
-                        }
-                        _ => {
-                            draw_text(scene, transform, &glyph_run, run, &[]);
-                        }
+            match item {
+                PositionedLayoutItem::GlyphRun(glyph_run) => {
+                    let idx = glyph_run.run().index();
+                    if pending_run_idx != Some(idx) {
+                        flush(scene, transform, &mut pending, spans, spoiler_style, default_color);
+                        pending_run_idx = Some(idx);
                     }
-                } else {
-                    draw_text(scene, transform, &glyph_run, run, &[]);
+                    pending.push(glyph_run);
+                }
+                PositionedLayoutItem::InlineBox(_) => {
+                    flush(scene, transform, &mut pending, spans, spoiler_style, default_color);
+                    pending_run_idx = None;
                 }
             }
+        }
+        
+        flush(scene, transform, &mut pending, spans, spoiler_style, default_color);
+    }
+}
+
+fn flush(scene: &mut Scene,
+         transform: Affine,
+         pending: &mut Vec<GlyphRun<Paint>>,
+         spans: &[Span],
+         spoiler_style: SpoilerStyle,
+         default_color: &Paint) {
+    if pending.is_empty() { return; }
+
+    let run = pending[0].run().clone();
+    let run_start_x = pending[0].offset() as f64;
+    let text_range = run.text_range();
+
+    let segments_all = spoiled_spans(&text_range, spans)
+        .map(|spans_iter| spoiler_segments(&run, spans_iter, run_start_x))
+        .unwrap_or_default();
+
+    for glyph_run in pending.drain(..) {
+        let window_start = glyph_run.offset() as f64;
+        let window_end = window_start + glyph_run.advance() as f64;
+
+        let lo = segments_all.partition_point(|s| s.end <= window_start - 0.5);
+        let hi = segments_all.partition_point(|s| s.start < window_end + 0.5);
+        let segments = &segments_all[lo..hi];
+
+        if !segments.is_empty() {
+            match spoiler_style {
+                SpoilerStyle::TgMasked => {
+                    draw_text(scene, transform, &glyph_run, &run, &segments);
+                    draw_spoiler_tg(scene, transform, &glyph_run, &run, &segments, 1.0, default_color);
+                }
+                SpoilerStyle::TgOverlay => {
+                    draw_text(scene, transform, &glyph_run, &run, &[]);
+                    draw_spoiler_tg(scene, transform, &glyph_run, &run, &segments, 0.7, default_color);
+                }
+                _ => {
+                    draw_text(scene, transform, &glyph_run, &run, &[]);
+                }
+            }
+        } else {
+            draw_text(scene, transform, &glyph_run, &run, &[]);
         }
     }
 }
 
 fn draw_text(scene: &mut Scene,
              transform: Affine,
-             glyph_run: &GlyphRun<Brush>,
-             run: &Run<Brush>,
+             glyph_run: &GlyphRun<Paint>,
+             run: &Run<Paint>,
              segments: &[SpoilerSegment],
 ) {
     let mut x = glyph_run.offset() as f64;
@@ -234,8 +280,15 @@ fn draw_text(scene: &mut Scene,
     let font_size = run.font_size();
     let coords = run.normalized_coords();
 
+    let style = glyph_run.style();
+    let run_width = glyph_run.advance();
+    let start_x = glyph_run.offset() as f64;
+    let run_height = (run.metrics().ascent + run.metrics().descent) as f64;
+    let brush = style.brush.to_brush(run_width as f64, run_height);
+
+
     scene.draw_glyphs(font)
-        .brush(&glyph_run.style().brush)
+        .brush(&brush)
         .hint(true)
         .transform(transform)
         .font_size(font_size)
@@ -258,61 +311,133 @@ fn draw_text(scene: &mut Scene,
             }),
         );
 
-    let style = glyph_run.style();
-    let run_width = glyph_run.advance();
-    let start_x = glyph_run.offset() as f64;
+    let curr_x = start_x;
+    let end_x = start_x + run_width as f64;
 
     if let Some(underline) = style.underline.as_ref() {
         let offset = underline.offset.unwrap_or(run.metrics().underline_offset) as f64;
         let size = underline.size.unwrap_or(run.metrics().underline_size) as f64;
         let y_pos = y - offset;
-        let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0,
-                                           start_x + run_width as f64,
-                                           y_pos + size / 2.0
-        );
-        scene.fill(Fill::NonZero, transform, &underline.brush, None, &rect);
+        let ubrush = underline.brush.to_brush(run_width as f64, run_height);
+
+        draw_line(scene, transform, segments, end_x, size, y_pos, &ubrush, curr_x)
     }
 
     if let Some(strikethrough) = style.strikethrough.as_ref() {
         let offset = strikethrough.offset.unwrap_or(run.metrics().strikethrough_offset) as f64;
         let size = strikethrough.size.unwrap_or(run.metrics().strikethrough_size) as f64;
         let y_pos = y - offset;
-        let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0,
-                                           start_x + run_width as f64,
-                                           y_pos + size / 2.0
-        );
-        scene.fill(Fill::NonZero, transform, &strikethrough.brush, None, &rect);
+        let sbrush = strikethrough.brush.to_brush(run_width as f64, run_height);
+
+        draw_line(scene, transform, segments, end_x, size, y_pos, &sbrush, curr_x);
+    }
+}
+
+fn draw_line(scene: &mut Scene,
+             transform: Affine,
+             segments: &[SpoilerSegment],
+             end_x: f64,
+             size: f64,
+             y_pos: f64,
+             brush: &Brush,
+             mut curr_x: f64) {
+    for seg in segments {
+        if curr_x >= end_x { return; }
+        if seg.start > curr_x {
+            let rect = vello::kurbo::Rect::new(curr_x, y_pos - size / 2.0, seg.start.min(end_x), y_pos + size / 2.0);
+            scene.fill(Fill::NonZero, transform, brush, None, &rect);
+        }
+        curr_x = curr_x.max(seg.end);
+    }
+    if curr_x < end_x {
+        let rect = vello::kurbo::Rect::new(curr_x, y_pos - size / 2.0, end_x, y_pos + size / 2.0);
+        scene.fill(Fill::NonZero, transform, brush, None, &rect);
     }
 }
 
 fn is_skipped(segments: &[SpoilerSegment], x: f64) -> bool {
-    segments.iter().any(|s| x >= s.start && x < s.end)
+    let idx = segments.partition_point(|s| s.start <= x);
+    idx > 0 && x < segments[idx - 1].end
 }
 
 fn draw_spoiler_tg(scene: &mut Scene,
                    transform: Affine,
-                   glyph_run: &GlyphRun<Brush>,
-                   run: &Run<Brush>,
+                   glyph_run: &GlyphRun<Paint>,
+                   run: &Run<Paint>,
                    segments: &[SpoilerSegment],
                    opacity_mod: f32,
+                   default_color: &Paint,
 ) {
+    const ALPHAS: [f32; 3] = [0.3, 0.6, 1.0];
     let metrics = run.metrics();
     let font_size = run.font_size();
     let baseline_y = (glyph_run.baseline() - metrics.ascent) as f64;
     let h = (metrics.ascent + metrics.descent) as f64;
+    let run_width = glyph_run.advance() as f64;
+
+
+    let window_start = glyph_run.offset() as f64;
+    let window_end = window_start + glyph_run.advance() as f64;
+
+    let mut tier_paths: [BezPath; 3] = Default::default();
+    let mut clip = BezPath::new();
+    let mut any = false;
 
     for seg in segments {
         let w = seg.end - seg.start;
-        emit_spoiler(scene,
-                     transform,
-                     seg.start,
-                     baseline_y,
-                     w, h,
-                     glyph_run,
-                     font_size,
-                     &seg.text_range,
-                     opacity_mod
-        );
+        if w <= 0.0 || h <= 0.0 { continue; }
+        
+        let draw_start = seg.start.max(window_start);
+        let draw_end = seg.end.min(window_end);
+        if draw_end <= draw_start { continue; }
+        
+        any = true;
+        clip.extend(KRect::new(draw_start, baseline_y, draw_end, baseline_y + h).path_elements(0.1));
+        
+        accumulate_spoiler_particles(&mut tier_paths, seg.start, baseline_y, w, h,
+                                     font_size as f64, seed_for(&seg.text_range));
+    }
+
+    if !any { return; }
+
+    let brush = default_color.to_brush(run_width, h);
+    for (i, path) in tier_paths.iter().enumerate() {
+        scene.push_layer(Fill::NonZero, BlendMode::default(), ALPHAS[i] * opacity_mod, transform, &clip);
+        scene.fill(Fill::NonZero, transform, &brush, None, path);
+        scene.pop_layer();
+    }
+}
+
+fn seed_for(text_range: &Range<usize>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text_range.start.hash(&mut hasher);
+    text_range.end.hash(&mut hasher);
+    hasher.finish()
+}
+
+// TODO: Replace with GPU instancing perhaps
+fn accumulate_spoiler_particles(
+    tier_paths: &mut [BezPath; 3],
+    x: f64, y: f64, w: f64, h: f64,
+    font_size: f64, seed: u64,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+
+    let mut rng = SmallRng::seed_from_u64(seed);
+    let char_width = font_size * 0.6;
+    let chars_in_run = (w / char_width).max(1.0);
+    let count = (chars_in_run * 30.0).min(500.0) as usize;
+    // Particle radius scales with font size:
+    // TG uses ~1.2-1.4dp for ~16sp text
+    let radius = (font_size / 16.0) * 0.7;
+
+    for _ in 0..count {
+        let px = x + rng.random::<f64>() * w;
+        let py = y + rng.random::<f64>() * h;
+        let tier_idx = rng.random_range(0usize..3);
+        tier_paths[tier_idx].extend(KCircle::new((px, py), radius).path_elements(0.1));
     }
 }
 
@@ -331,75 +456,6 @@ fn spoiled_spans<'a>(
     iter.peek().is_some().then_some(iter)
 }
 
-fn emit_spoiler(
-    scene: &mut Scene,
-    transform: Affine,
-    x: f64, y: f64, w: f64, h: f64,
-    glyph_run: &GlyphRun<Brush>,
-    font_size: f32,
-    text_range: &Range<usize>,
-    opacity_mod: f32,
-) {
-    let color = match &glyph_run.style().brush {
-        Brush::Solid(c) => {
-            c.multiply_alpha(opacity_mod)
-        }
-        _ => {
-            let c = Color::BLACK;
-            c.multiply_alpha(opacity_mod)
-        },
-    };
-    let mut hasher = DefaultHasher::new();
-    text_range.start.hash(&mut hasher);
-    text_range.end.hash(&mut hasher);
-    let seed = hasher.finish();
-
-    draw_spoiler_particles(scene, transform, x, y, w, h, color, font_size as f64, seed);
-}
-
-// TODO: Replace with GPU instancing perhaps
-fn draw_spoiler_particles(
-    scene: &mut Scene,
-    transform: Affine,
-    x: f64, y: f64, w: f64, h: f64,
-    color: Color,
-    font_size: f64,
-    seed: u64,
-) {
-    if w <= 0.0 || h <= 0.0 {
-        return;
-    }
-
-    let mut rng = SmallRng::seed_from_u64(seed);
-    let alphas: [f32; 3] = [0.3, 0.6, 1.0];
-
-    let char_width = font_size * 0.6;
-    let chars_in_run = (w / char_width).max(1.0);
-    let count = (chars_in_run * 30.0).min(500.0) as usize;
-
-    // Particle radius scales with font size:
-    // TG uses ~1.2-1.4dp for ~16sp text
-    let radius = (font_size / 16.0) * 0.7;
-
-    let rgba8 = color.to_rgba8();
-    let (cr, cg, cb, ca) = (rgba8.r, rgba8.g, rgba8.b, rgba8.a);
-
-    let mut tier_paths: [BezPath; 3] = Default::default();
-
-    for _ in 0..count {
-        let px = x + rng.random::<f64>() * w;
-        let py = y + rng.random::<f64>() * h;
-        let tier_idx = rng.random_range(0usize..3);
-        tier_paths[tier_idx].extend(KCircle::new((px, py), radius).path_elements(0.1));
-    }
-
-    for (i, path) in tier_paths.iter().enumerate() {
-        let particle_alpha = (ca as f32 * alphas[i]).round() as u8;
-        let particle_color = Color::from_rgba8(cr, cg, cb, particle_alpha);
-        scene.fill(Fill::NonZero, transform, particle_color, None, path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,6 +465,7 @@ mod tests {
     use crate::primitives::shape::{Corners, ShapeKind};
     use crate::primitives::text::RichText;
     use std::sync::Arc;
+    use taffy::{Dimension, FlexDirection, LengthPercentage, Rect};
 
     fn vp() -> Viewport {
         Viewport { width: 1.0, height: 1.0 }

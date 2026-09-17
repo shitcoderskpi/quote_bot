@@ -17,12 +17,13 @@
 
 (define content (string-append (get-payload 'content "") "   "))
 (define avatar-initials (get-payload 'avatar_initials ""))
-(define avatar-top (get-payload 'avatar_color_top "#ff0000"))
-(define avatar-bottom (get-payload 'avatar_color_bottom "#dd0000"))
+(define avatar-color-top (get-payload 'avatar_color_top "#ddd"))
+(define avatar-color-bottom (get-payload 'avatar_color_bottom "#fff"))
+(define name-color (get-payload 'name_color "#ffffff"))
 (define has-image? (not (equal? (get-payload 'image "") "")))
 
 (define theme-link-color (hex "#4CA635"))
-(define theme-code-family "monospace")
+(define theme-code-family "JetbrainsMono Nerd Font")
 
 (node (style (flex-row) (align-items 'end)
              (padding (px 2) (px 4) (px 4) (px 1)))
@@ -35,7 +36,8 @@
         (node (style (absolute)
                      (inset (px 0) (px 0) (px 0) (px 0)))
           (shape (circle)
-                 (fill (linear-gradient (hex avatar-top) (hex avatar-bottom))))))
+                 (fill (linear-gradient (hex avatar-color-top)
+                                        (hex avatar-color-bottom))))))
     (if has-image?
         (image (get-payload 'image "") (circle (px 36)))
         (text avatar-initials
@@ -58,7 +60,9 @@
     (node (style (flex-row) (align-items 'center) (justify-content 'space-between)
                  (margin-bottom (px 4)) (gap (px 6)))
       (text username
-            (size (pt 15)) (color (hex avatar-top)) (family "sans-serif") (weight 700) (wrap #f))
+            (size (pt 15)) 
+            (color (hex name-color))
+            (family "sans-serif") (weight 700) (wrap #f))
       (if (not (equal? raw-status ""))
           (node (style (direction 'row) (align-items 'center) (justify-content 'center)
                        (padding-xy (px 6) (px 0)) (margin-right (px -6)))

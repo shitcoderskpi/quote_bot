@@ -3,7 +3,8 @@ use parley::{
     StyleProperty,
 };
 use std::ops::Range;
-use vello::peniko::{self, Brush};
+use vello::peniko::{self, Color};
+use crate::primitives::paint::Paint;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpoilerStyle {
@@ -23,7 +24,7 @@ pub struct Span {
     pub italic: bool,
     pub underline: bool,
     pub strikethrough: bool,
-    pub color: Option<peniko::Color>,
+    pub paint: Option<Paint>,
     pub line_height: Option<f32>,
     pub spoiler: bool,
 }
@@ -38,7 +39,7 @@ impl Span {
             italic: false,
             underline: false,
             strikethrough: false,
-            color: None,
+            paint: None,
             line_height: None,
             spoiler: false,
         }
@@ -62,7 +63,7 @@ pub struct RichText {
     pub overflow_wrap: parley::OverflowWrap,
     pub default_font_size: f64,
     pub default_family: String,
-    pub default_color: peniko::Color,
+    pub default_color: Paint,
     pub default_weight: FontWeight,
     pub default_italic: bool,
     pub default_underline: bool,
@@ -82,7 +83,7 @@ impl RichText {
             overflow_wrap: parley::OverflowWrap::Normal,
             default_font_size: 16.0,
             default_family: "sans-serif".to_string(),
-            default_color: peniko::Color::BLACK,
+            default_color: Paint::solid(Color::BLACK),
             default_weight: FontWeight::NORMAL,
             default_italic: false,
             default_underline: false,
@@ -101,16 +102,16 @@ impl RichText {
     pub fn layout(
         &self,
         font_cx: &mut FontContext,
-        layout_cx: &mut LayoutContext<Brush>,
+        layout_cx: &mut LayoutContext<Paint>,
         max_width: Option<f64>,
-    ) -> Layout<Brush> {
+    ) -> Layout<Paint> {
         let mut builder = layout_cx.ranged_builder(font_cx, &self.text, 1.0, true);
 
         builder.push_default(StyleProperty::FontFamily(
             parley::style::FontFamily::named(&self.default_family),
         ));
         builder.push_default(StyleProperty::FontSize(self.default_font_size as f32));
-        builder.push_default(StyleProperty::Brush(Brush::Solid(self.default_color)));
+        builder.push_default(StyleProperty::Brush(self.default_color.clone()));
         builder.push_default(StyleProperty::FontWeight(self.default_weight));
         if self.default_italic {
             builder.push_default(StyleProperty::FontStyle(parley::FontStyle::Italic));
@@ -142,8 +143,8 @@ impl RichText {
             if span.strikethrough {
                 builder.push(StyleProperty::Strikethrough(span.strikethrough), span.range.clone());
             }
-            if let Some(c) = span.color {
-                builder.push(StyleProperty::Brush(Brush::Solid(c)), span.range.clone());
+            if let Some(c) = &span.paint {
+                builder.push(StyleProperty::Brush(c.clone()), span.range.clone());
             }
             if let Some(lh) = span.line_height {
                 builder.push(StyleProperty::LineHeight(parley::style::LineHeight::MetricsRelative(lh)), span.range.clone());
@@ -158,8 +159,7 @@ impl RichText {
                 match self.spoiler_style {
                     SpoilerStyle::Faded => {
                         builder.push(StyleProperty::Brush(
-                            Brush::Solid(self.default_color.multiply_alpha(0.3)
-                            )
+                            self.default_color.clone().multiply_alpha(0.3)
                         ), span.range.clone());
                     }
                     _ => {}
@@ -198,7 +198,7 @@ mod tests {
         assert!(rt.wrap);
         assert_eq!(rt.default_font_size, 16.0);
         assert_eq!(rt.default_family, "sans-serif");
-        assert_eq!(rt.default_color, peniko::Color::BLACK);
+        assert!(matches!(rt.default_color, Paint::Solid(c) if c == Color::BLACK));
         assert_eq!(rt.default_weight, FontWeight::NORMAL);
         assert!(!rt.default_italic);
         assert!(!rt.default_underline);
@@ -245,7 +245,7 @@ mod tests {
         assert!(!s.italic);
         assert!(!s.underline);
         assert!(!s.strikethrough);
-        assert!(s.color.is_none());
+        assert!(s.paint.is_none());
         assert!(s.line_height.is_none());
     }
 
@@ -258,7 +258,7 @@ mod tests {
         s.italic = true;
         s.underline = true;
         s.strikethrough = true;
-        s.color = Some(peniko::Color::WHITE);
+        s.paint = Some(Paint::solid(Color::BLACK));
         s.line_height = Some(1.5);
         assert_eq!(s.font_family.as_deref(), Some("monospace"));
         assert_eq!(s.font_size, Some(24.0));
@@ -277,7 +277,7 @@ mod tests {
     fn layout_nonempty_text_has_positive_dims() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let rt = RichText::plain("Hello, world!");
+        let mut rt = RichText::plain("Hello, world!");
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0, "width should be > 0, got {}", layout.width());
         assert!(layout.height() > 0.0, "height should be > 0, got {}", layout.height());
@@ -287,7 +287,7 @@ mod tests {
     fn layout_empty_text() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let rt = RichText::plain("");
+        let mut rt = RichText::plain("");
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert_eq!(layout.width(), 0.0);
     }
@@ -297,7 +297,7 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let long_text = "a ".repeat(200);
-        let rt = RichText::plain(long_text);
+        let mut rt = RichText::plain(long_text);
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(100.0));
         assert!(layout.width() <= 101.0, "width {} should be <= 100", layout.width());
     }
@@ -309,7 +309,7 @@ mod tests {
         let mut span = Span::new(0..5);
         span.weight = Some(FontWeight::BOLD);
         span.font_size = Some(32.0);
-        let rt = RichText::plain("Hello World").with_span(span);
+        let mut rt = RichText::plain("Hello World").with_span(span);
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
         assert!(layout.height() > 0.0);
@@ -366,9 +366,9 @@ mod tests {
         span.italic = true;
         span.underline = true;
         span.strikethrough = true;
-        span.color = Some(peniko::Color::WHITE);
+        span.paint = Some(Paint::solid(Color::WHITE));
         span.line_height = Some(1.5);
-        let rt = RichText::plain("Hello World").with_span(span);
+        let mut rt = RichText::plain("Hello World").with_span(span);
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -378,7 +378,7 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let span = Span::new(0..5);
-        let rt = RichText::plain("Hello World").with_span(span);
+        let mut rt = RichText::plain("Hello World").with_span(span);
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -387,7 +387,7 @@ mod tests {
     fn layout_no_max_width() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let rt = RichText::plain("unconstrained");
+        let mut rt = RichText::plain("unconstrained");
         let layout = rt.layout(&mut font_cx, &mut layout_cx, None);
         assert!(layout.width() > 0.0);
     }
