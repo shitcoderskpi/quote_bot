@@ -1,7 +1,16 @@
 services:
-  redis:
-    container_name: redis
-    image: redis:7
+  nats:
+    container_name: nats
+    image: nats:alpine
+    command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "4222:4222"
+      - "8222:8222"
     networks:
       - monitoring
   bot:
@@ -13,10 +22,11 @@ services:
       context: ../services/bot
       dockerfile: Dockerfile
     depends_on:
-      - redis
+      nats:
+        condition: service_healthy
     environment:
       - BOT_TOKEN
-      - REDIS_HOST
+      - NATS_URL=nats://nats:4222
       - LOG_LVL
       - LOG_PATH
     ports:
@@ -33,10 +43,11 @@ services:
       context: ../services/generator/
       dockerfile: Dockerfile
     depends_on:
-      - redis
+      nats:
+        condition: service_healthy
     environment:
       - RUST_LOG=info
-      - REDIS_HOST
+      - NATS_URL=nats://nats:4222
       - TEMPLATE
       - DPI
     devices:
