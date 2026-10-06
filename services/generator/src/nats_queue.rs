@@ -47,9 +47,9 @@ impl NatsQueue {
         }
     }
 
-    pub async fn enqueue(&mut self, queue: &str, payload: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn enqueue(&mut self, queue: &str, payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_stream(queue).await?;
-        self.js.publish(queue.to_string(), payload.into()).await?;
+        self.js.publish(queue.to_string(), payload.to_vec().into()).await?;
         Ok(())
     }
 }

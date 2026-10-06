@@ -7,6 +7,9 @@ use vello::Scene;
 use crate::renderer::SceneTask;
 use crate::templater::Templater;
 
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 mod compressor;
 mod config;
 mod nats_queue;
@@ -24,6 +27,7 @@ async fn process_job<'a>(
     renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
     buf: &'a mut Vec<u8>,
+    webp_buf: &mut Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message;
     let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
@@ -32,6 +36,9 @@ async fn process_job<'a>(
     let theme = if input_msg.theme.is_empty() { "light" } else { &input_msg.theme };
 
     let executable = themes.get(theme).ok_or_else(|| format!("Template {} not found", theme))?;
+
+    let mut scene = Scene::new();
+    let mut scaled_scene = Scene::new();
 
     let node_tree = templater.render_template(executable, &mut input_msg)?;
 
@@ -42,7 +49,7 @@ async fn process_job<'a>(
     let width  = measured_w;
     let height = measured_h;
 
-    let mut scene = Scene::new();
+    scene.reset();
     let root_box = Rect::new(0.0, 0.0, width, height);
 
     renderer.render(&mut scene, &node_tree, root_box, viewport);
@@ -51,7 +58,7 @@ async fn process_job<'a>(
     let scaled_width = (width * scale).ceil() as u32;
     let scaled_height = (height * scale).ceil() as u32;
 
-    let mut scaled_scene = Scene::new();
+    scaled_scene.reset();
     scaled_scene.append(&scene, Some(vello::kurbo::Affine::scale(scale)));
 
     let (rx, task) = SceneTask::new(scaled_scene, scaled_width, scaled_height);
@@ -63,13 +70,15 @@ async fn process_job<'a>(
     };
     info!("Rendered {}x{}", w, h);
 
-    let mut webp_data = std::io::Cursor::new(Vec::new());
+    webp_buf.clear();
+    let mut webp_data = std::io::Cursor::new(webp_buf);
     let img_buf = image::RgbaImage::from_raw(w, h, pixels)
         .ok_or("Failed to create RgbaImage from raw pixels")?;
     img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
+    let webp_buf = webp_data.into_inner();
 
     let result_img = proto::quote::ResultImage {
-        image: webp_data.into_inner(),
+        image: std::mem::take(webp_buf),
         message_id: input_msg.message_id,
         chat_id: input_msg.chat_id,
     };
@@ -125,7 +134,13 @@ async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater)
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("generator=info".parse()?))
+        .with_env_filter(EnvFilter::from_default_env()
+            .add_directive("generator=info".parse()?)
+            .add_directive("steel=warn".parse()?)
+            .add_directive("vello=warn".parse()?)
+            .add_directive("wgpu=warn".parse()?)
+            .add_directive("parley=warn".parse()?)
+        )
         .init();
 
     let cfg = config::Config::from_env()?;
@@ -146,9 +161,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connecting to NATS at {}", cfg.nats_url);
     let mut queue = nats_queue::NatsQueue::connect(&cfg.nats_url).await?;
     let mut decmpd: Vec<u8> = Vec::new();
+    let mut cmpd: Vec<u8> = Vec::new();
+    let mut webp_buf: Vec<u8> = Vec::new();
 
     loop {
-        let mut cmpd: Vec<u8> = Vec::new();
+        cmpd.clear();
         let payload = match queue.dequeue(&cfg.queue_name).await {
             Ok(Some(p)) => p,
             Ok(None) => continue,
@@ -167,9 +184,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd).await {
+        match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd, &mut webp_buf).await {
             Ok(()) => {
-                if let Err(e) = queue.enqueue(&cfg.results_queue, cmpd).await {
+                if let Err(e) = queue.enqueue(&cfg.results_queue, &cmpd).await {
                     error!("Failed to enqueue result: {}", e);
                 } else {
                     info!("Pushed result for message");

@@ -11,7 +11,7 @@ futures-util = "0.3.34"
 tokio = { version = "1.53.1", features = ["full"] }
 vello = { version = "0.11.0", features = ["wgpu"] }
 zstd = "0.14.0"
-tracing = "0.1.44"
+tracing = { version = "0.1.44", features = ["release_max_level_info"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 thiserror = "2.0.20"
 steel-core = "0.8.3"
@@ -19,6 +19,7 @@ taffy = "0.14.0"
 async-channel = "2.5.0"
 rand = "0.10.2"
 prost = "0.14.4"
+tikv-jemallocator = "0.6"
 
 [profile.dev]
 opt-level = 0
@@ -29,8 +30,8 @@ split-debuginfo = "unpacked"
 opt-level = 3
 
 [profile.release]
-strip = true
-lto = true
+strip = false
+lto = false
 codegen-units = 16
 
 [build-dependencies]

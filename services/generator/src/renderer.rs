@@ -79,24 +79,51 @@ impl RenderContext {
     }
 
     async fn worker(mut ctx: GpuContext, rx: Receiver<SceneTask>) {
+        let mut cached_width = 0;
+        let mut cached_height = 0;
+        let mut texture: Option<wgpu::Texture> = None;
+        let mut view: Option<wgpu::TextureView> = None;
+        let mut buffer: Option<wgpu::Buffer> = None;
+        let mut pixels = Vec::new();
+
         while let Ok(task) = rx.recv().await {
             let width = task.width;
             let height = task.height;
-            let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("render_target"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let padded_bytes_per_row = (width * 4 + 255) & !255;
+
+            if width != cached_width || height != cached_height || texture.is_none() {
+                let tex = ctx.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("render_target"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                
+                view = Some(tex.create_view(&wgpu::TextureViewDescriptor::default()));
+                texture = Some(tex);
+
+                buffer = Some(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("readback"),
+                    size: (padded_bytes_per_row * height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }));
+
+                cached_width = width;
+                cached_height = height;
+            }
+
+            let tex = texture.as_ref().unwrap();
+            let tex_view = view.as_ref().unwrap();
+            let buf = buffer.as_ref().unwrap();
 
             let params = RenderParams {
                 base_color: vello::peniko::Color::TRANSPARENT,
@@ -106,18 +133,10 @@ impl RenderContext {
             };
 
             if let Err(e) = ctx.renderer
-                .render_to_texture(&ctx.device, &ctx.queue, &task.scene, &view, &params) {
+                .render_to_texture(&ctx.device, &ctx.queue, &task.scene, tex_view, &params) {
                 task.tx.send(Err(format!("Failed to render scene to a texture: {}", e))).ok();
                 continue;
             }
-
-            let padded_bytes_per_row = (task.width * 4 + 255) & !255;
-            let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("readback"),
-                size: (padded_bytes_per_row * task.height) as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
 
             let mut encoder = ctx
                 .device
@@ -125,17 +144,17 @@ impl RenderContext {
 
             encoder.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
+                    texture: tex,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::TexelCopyBufferInfo {
-                    buffer: &buffer,
+                    buffer: buf,
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(padded_bytes_per_row),
-                        rows_per_image: Some(task.height),
+                        rows_per_image: Some(height),
                     },
                 },
                 wgpu::Extent3d {
@@ -147,7 +166,7 @@ impl RenderContext {
 
             ctx.queue.submit(std::iter::once(encoder.finish()));
 
-            let buffer_slice = buffer.slice(..);
+            let buffer_slice = buf.slice(..);
             let (tx_gpu, rx_gpu) = std::sync::mpsc::channel();
             buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
                 tx_gpu.send(result).unwrap();
@@ -168,18 +187,19 @@ impl RenderContext {
                 Err(_) => continue,
             };
 
-            let unpadded_bytes_per_row = task.width * 4;
-            let mut pixels = Vec::with_capacity((unpadded_bytes_per_row * task.height) as usize);
-            for row in 0..task.height {
+            let unpadded_bytes_per_row = width * 4;
+            pixels.clear();
+            pixels.reserve((unpadded_bytes_per_row * height) as usize);
+            for row in 0..height {
                 let start = (row * padded_bytes_per_row) as usize;
                 let end = start + unpadded_bytes_per_row as usize;
                 pixels.extend_from_slice(&mapped[start..end]);
             }
 
             drop(mapped);
-            buffer.unmap();
+            buf.unmap();
 
-            task.tx.send(Ok((width, height, pixels))).ok();
+            task.tx.send(Ok((width, height, std::mem::take(&mut pixels)))).ok();
         }
     }
 }
