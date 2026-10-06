@@ -1,20 +1,20 @@
-#!/usr/bin/env python3
-
 import argparse
 import json
 import os
 import sys
 import time
-from base64 import b64encode, b64decode
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Optional
 
-import redis
+import asyncio
+import nats
+from nats.errors import TimeoutError
 import zstandard as zstd
 
-REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+import quote_pb2
+
+NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 JOBS_QUEUE = "generate:jobs"
 RESULTS_QUEUE = "generate:results"
 
@@ -35,22 +35,33 @@ class FakeMessage:
     dpi: Optional[int] = None
     theme: str = "light"
 
-    def to_json_bytes(self) -> bytes:
-        data = {
-            "header": self.header,
-            "grad_id": self.grad_id,
-            "username": self.username,
-            "user_status": self.user_status,
-            "user_role": self.user_role,
-            "content": self.content,
-            "entities": self.entities,
-            "image": None,
-        }
+    def to_protobuf_bytes(self) -> bytes:
+        msg = quote_pb2.SerializableMessage()
+        msg.grad_id = self.grad_id
+        msg.username = self.username
+        if self.user_status is not None:
+            msg.user_status = self.user_status
+        if self.user_role is not None:
+            msg.user_role = self.user_role
+        msg.content = self.content
+        if self.image_bytes is not None:
+            msg.image = self.image_bytes
         if self.dpi is not None:
-            data["dpi"] = self.dpi
+            msg.dpi = self.dpi
         if self.theme != "light":
-            data["theme"] = self.theme
-        return json.dumps(data, ensure_ascii=False).encode("utf-8")
+            msg.theme = self.theme
+
+        if self.header:
+            msg.message_id = self.header.get("message_id", 0)
+            msg.chat_id = self.header.get("chat", {}).get("id", 0)
+
+        for ent in self.entities:
+            pb_ent = msg.entities.add()
+            pb_ent.type = ent["type"]
+            pb_ent.offset = ent["offset"]
+            pb_ent.length = ent["length"]
+
+        return msg.SerializeToString()
 
 
 def make_header(chat_id: int = 123456789, message_id: int = 42) -> dict:
@@ -100,6 +111,41 @@ TESTS: dict[str, FakeMessage] = {
         header=make_header(),
         image_bytes=None,
     ),
+    "more_entities": FakeMessage(
+        grad_id=3,
+        username="More Entities User",
+        user_status=None,
+        user_role="member",
+        content="Spoiler text, code here, and underline!",
+        entities=[
+            {"type": "spoiler", "offset": 0, "length": 7},
+            {"type": "code", "offset": 14, "length": 9},
+            {"type": "underline", "offset": 29, "length": 9},
+        ],
+        header=make_header(),
+        image_bytes=None,
+    ),
+    "all_entities": FakeMessage(
+        grad_id=4,
+        username="All Entities",
+        user_status=None,
+        user_role="member",
+        content="b i u s code pre spoiler link mention emoji",
+        entities=[
+            {"type": "bold", "offset": 0, "length": 1},
+            {"type": "italic", "offset": 2, "length": 1},
+            {"type": "underline", "offset": 4, "length": 1},
+            {"type": "strikethrough", "offset": 6, "length": 1},
+            {"type": "code", "offset": 8, "length": 4},
+            {"type": "pre", "offset": 13, "length": 3},
+            {"type": "spoiler", "offset": 17, "length": 7},
+            {"type": "text_link", "offset": 25, "length": 4},
+            {"type": "mention", "offset": 30, "length": 7},
+            {"type": "custom_emoji", "offset": 38, "length": 5},
+        ],
+        header=make_header(),
+        image_bytes=None,
+    ),
     "long_text": FakeMessage(
         grad_id=6,
         username="Verbose User",
@@ -136,8 +182,9 @@ class Colors:
     BOLD = "\033[1m"
 
 
-def run_test(
-    r: redis.Redis,
+async def run_test(
+    nc,
+    js,
     name: str,
     msg: FakeMessage,
     timeout: int,
@@ -154,16 +201,16 @@ def run_test(
     print(f"  avatar   : {'yes' if msg.image_bytes else 'no'} ({0} bytes)")
     print(f"  entities : {len(msg.entities)}")
 
-    payload = msg.to_json_bytes()
+    payload = msg.to_protobuf_bytes()
     compressed = compressor.compress(payload)
 
     print(
-        f"\n  {Colors.DIM}Payload   : {len(payload)} bytes JSON -> {len(compressed)} bytes zstd{Colors.RESET}"
+        f"\n  {Colors.DIM}Payload   : {len(payload)} bytes PB -> {len(compressed)} bytes zstd{Colors.RESET}"
     )
-    r.delete(RESULTS_QUEUE)
-
+    
+    sub = await nc.subscribe(RESULTS_QUEUE)
     t0 = time.monotonic()
-    r.lpush(JOBS_QUEUE, compressed)
+    await js.publish(JOBS_QUEUE, compressed)
     print(f"  {Colors.DIM}Pushed to : {JOBS_QUEUE}{Colors.RESET}")
 
     print(
@@ -171,48 +218,50 @@ def run_test(
         end="",
         flush=True,
     )
-    result = r.brpop([RESULTS_QUEUE], timeout=timeout)
-    elapsed_ms = (time.monotonic() - t0) * 1000
-
-    if result is None:
+    
+    try:
+        result = await sub.next_msg(timeout=timeout)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+    except TimeoutError:
         print(f"\r  {Colors.RED}TIMEOUT - no response in {timeout}s{Colors.RESET}")
+        await sub.unsubscribe()
         return False
 
-    _, raw_result = result
+    raw_result = result.data
+    await sub.unsubscribe()
     print(
         f"\r  {Colors.DIM}Got result: {len(raw_result)} bytes in {elapsed_ms:.0f} ms{Colors.RESET}    "
     )
 
     try:
         decompressed = decompressor.decompress(raw_result)
-        result_json = json.loads(decompressed)
+        result_msg = quote_pb2.ResultImage()
+        result_msg.ParseFromString(decompressed)
     except Exception as e:
         print(f"  {Colors.RED}DECOMPRESS/PARSE FAILED: {e}{Colors.RESET}")
         return False
 
-    if "image" not in result_json:
-        print(f"  {Colors.RED}Missing 'image' key in response{Colors.RESET}")
-        return False
-    try:
-        img_bytes = b64decode(result_json["image"])
-    except Exception as e:
-        print(f"  {Colors.RED}base64 decode failed: {e}{Colors.RESET}")
+    if not result_msg.image:
+        print(f"  {Colors.RED}Missing 'image' in response{Colors.RESET}")
         return False
 
-    resp_header = result_json.get("header", {})
+    img = result_msg.image
+
     if msg.header:
         expected_chat_id = msg.header.get("chat", {}).get("id")
-        actual_chat_id = resp_header.get("chat", {}).get("id")
+        actual_chat_id = result_msg.chat_id
         if expected_chat_id != actual_chat_id:
             print(
                 f"  {Colors.YELLOW}Header chat_id mismatch: expected {expected_chat_id}, got {actual_chat_id}{Colors.RESET}"
             )
 
-    is_webp = img_bytes[:4] == b"RIFF" and img_bytes[8:12] == b"WEBP"
+    is_webp = img[:4] == b"RIFF" and img[8:12] == b"WEBP"
     fmt_str = "WebP" if is_webp else "unknown"
 
-    print(f"  {Colors.DIM}Image     : {len(img_bytes)} bytes ({fmt_str}){Colors.RESET}")
-    print(f"  {Colors.DIM}Header    : {json.dumps(resp_header)}{Colors.RESET}")
+    print(f"  {Colors.DIM}Image     : {len(img)} bytes ({fmt_str}){Colors.RESET}")
+    print(
+        f"  {Colors.DIM}Header    : chat_id={result_msg.chat_id} message_id={result_msg.message_id}{Colors.RESET}"
+    )
     print(f"  {Colors.DIM}Roundtrip : {elapsed_ms:.0f} ms{Colors.RESET}")
 
     if not is_webp:
@@ -222,17 +271,16 @@ def run_test(
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{name}.webp")
         with open(out_path, "wb") as f:
-            f.write(img_bytes)
+            f.write(img)
         print(f"  {Colors.DIM}Saved to  : {out_path}{Colors.RESET}")
 
     print(f"  {Colors.GREEN}PASSED{Colors.RESET} ({elapsed_ms:.0f} ms)")
     return True
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="Test generator service locally")
-    parser.add_argument("--host", default=REDIS_HOST, help="Redis host")
-    parser.add_argument("--port", type=int, default=REDIS_PORT, help="Redis port")
+    parser.add_argument("--nats-url", default=NATS_URL, help="NATS URL")
     parser.add_argument(
         "--timeout", type=int, default=10, help="Seconds to wait for generator response"
     )
@@ -255,24 +303,33 @@ def main():
         return
 
     print(f"{Colors.BOLD}Generator Service Test Harness{Colors.RESET}")
-    print(f"Redis: {args.host}:{args.port}")
+    print(f"NATS: {args.nats_url}")
 
     try:
-        r = redis.Redis(host=args.host, port=args.port, db=0)
-        r.ping()
-    except redis.ConnectionError as e:
+        nc = await nats.connect(args.nats_url)
+        js = nc.jetstream()
+        
+        from nats.js.errors import BadRequestError
+        for queue in [JOBS_QUEUE, RESULTS_QUEUE]:
+            try:
+                await js.add_stream(name=queue, subjects=[queue])
+            except BadRequestError:
+                pass
+                
+    except Exception as e:
         print(
-            f"{Colors.RED}Cannot connect to Redis at {args.host}:{args.port}: {e}{Colors.RESET}"
+            f"{Colors.RED}Cannot connect to NATS at {args.nats_url}: {e}{Colors.RESET}"
         )
         sys.exit(1)
 
-    print(f"{Colors.GREEN}Redis connected{Colors.RESET}")
+    print(f"{Colors.GREEN}NATS connected{Colors.RESET}")
 
     if args.test:
         if args.test not in TESTS:
             print(
                 f"{Colors.RED}Unknown test '{args.test}'. Use --list to see available tests.{Colors.RESET}"
             )
+            await nc.close()
             sys.exit(1)
         tests_to_run = {args.test: TESTS[args.test]}
     else:
@@ -281,7 +338,7 @@ def main():
     passed = 0
     failed = 0
     for name, msg in tests_to_run.items():
-        ok = run_test(r, name, msg, args.timeout, args.save_images, args.output_dir)
+        ok = await run_test(nc, js, name, msg, args.timeout, args.save_images, args.output_dir)
         if ok:
             passed += 1
         else:
@@ -296,8 +353,9 @@ def main():
     print()
     print(f"{'=' * 60}")
 
+    await nc.close()
     sys.exit(0 if failed == 0 else 1)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

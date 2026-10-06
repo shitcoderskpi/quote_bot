@@ -9,42 +9,31 @@ use crate::templater::Templater;
 
 mod compressor;
 mod config;
-mod redis_queue;
+mod nats_queue;
 mod templater;
 mod primitives;
 mod renderer;
 
+pub mod proto;
+
 async fn process_job<'a>(
-    raw: &str,
+    raw: &[u8],
     cfg: &config::Config,
     templater: &mut Templater,
     themes: &HashMap<String, Executable>,
     renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
     buf: &'a mut Vec<u8>,
-) -> Result<&'a mut Vec<u8>, Box<dyn std::error::Error>> {
-    let input_msg: serde_json::Value = serde_json::from_str(raw)?;
-    let dpi = input_msg.get("dpi")
-        .and_then(|v| v.as_f64())
-        .map(|v| v as f32)
-        .unwrap_or(cfg.dpi);
-    let theme = input_msg.get("theme")
-        .and_then(|v| v.as_str())
-        .unwrap_or("light");
+) -> Result<(), Box<dyn std::error::Error>> {
+    use prost::Message;
+    let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
+    
+    let dpi = input_msg.dpi.unwrap_or(cfg.dpi as i32) as f32;
+    let theme = if input_msg.theme.is_empty() { "light" } else { &input_msg.theme };
 
     let executable = themes.get(theme).ok_or_else(|| format!("Template {} not found", theme))?;
 
-    let content = input_msg.get("content")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or("".to_string());
-    let entities = input_msg.get("entities")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or(vec![]);
-
-
-    let node_tree = templater.render_template(executable, raw, content, entities)?;
+    let node_tree = templater.render_template(executable, &mut input_msg)?;
 
     let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
 
@@ -79,21 +68,19 @@ async fn process_job<'a>(
         .ok_or("Failed to create RgbaImage from raw pixels")?;
     img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
 
-    use base64::prelude::*;
-    let b64_img = BASE64_STANDARD.encode(webp_data.into_inner());
+    let result_img = proto::quote::ResultImage {
+        image: webp_data.into_inner(),
+        message_id: input_msg.message_id,
+        chat_id: input_msg.chat_id,
+    };
+    let pb_data = result_img.encode_to_vec();
 
-    let header = input_msg.get("header")
-        .map(|h| h.to_string())
-        .unwrap_or_else(|| "{}".to_string());
+    buf.resize(compressor::max_compressed_size(pb_data.len()), 0);
 
-    let json_res = format!(r#"{{"header": {}, "image": "{}"}}"#, header, b64_img);
-
-    buf.resize(compressor::max_compressed_size(json_res.len()), 0);
-
-    let n = compressor::compress(&json_res, 9, buf.as_mut_slice())?;
+    let n = compressor::compress(&pb_data, 4, buf.as_mut_slice())?;
     buf.truncate(n);
 
-    Ok(buf)
+    Ok(())
 }
 
 async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> HashMap<String, Executable> {
@@ -156,19 +143,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut templater
     ).await;
 
-    info!("Connecting to Redis at {}:{}", cfg.redis_host, cfg.redis_port);
-    let mut queue = redis_queue::RedisQueue::connect(&cfg).await?;
-    let mut decmpd = String::new();
-    let mut cmpd: Vec<u8> = Vec::new();
+    info!("Connecting to NATS at {}", cfg.nats_url);
+    let mut queue = nats_queue::NatsQueue::connect(&cfg.nats_url).await?;
+    let mut decmpd: Vec<u8> = Vec::new();
 
     loop {
-        let payload = match queue.dequeue(&cfg.queue_name, 0.0).await {
-            Ok(p) => p,
+        let mut cmpd: Vec<u8> = Vec::new();
+        let payload = match queue.dequeue(&cfg.queue_name).await {
+            Ok(Some(p)) => p,
+            Ok(None) => continue,
             Err(e) => {
-                if !e.is_timeout() {
-                    error!("Error getting job: {}", e);
-                    continue;
-                }
+                error!("Error getting job: {}", e);
                 continue;
             }
         };
@@ -183,8 +168,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd).await {
-            Ok(result) => {
-                if let Err(e) = queue.enqueue(&cfg.results_queue, result).await {
+            Ok(()) => {
+                if let Err(e) = queue.enqueue(&cfg.results_queue, cmpd).await {
                     error!("Failed to enqueue result: {}", e);
                 } else {
                     info!("Pushed result for message");
