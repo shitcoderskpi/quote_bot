@@ -9,7 +9,7 @@ parley = "0.11.1"
 async-nats = "0.50.0"
 futures-util = "0.3.34"
 tokio = { version = "1.53.1", features = ["full"] }
-vello = { version = "0.10.0", features = ["wgpu"] }
+vello = { version = "0.11.0", features = ["wgpu"] }
 zstd = "0.14.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }

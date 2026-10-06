@@ -58,6 +58,7 @@ impl Templater {
         }
     }
 
+    #[cfg(test)]
     pub fn compile_str(&mut self, template_src: &'static str) -> Result<Executable, SteelErr> {
         let program = self.engine.emit_raw_program_no_path(template_src)?;
         let executable = self.engine.raw_program_to_executable(program)?;
