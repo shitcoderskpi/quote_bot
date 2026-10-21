@@ -1,6 +1,7 @@
-use steel::SteelVal;
 use steel::gc::Gc;
+use steel::rerrs::ErrorKind;
 use steel::rvals::Custom;
+use steel::{SteelErr, SteelVal};
 
 #[derive(Debug, Clone)]
 pub struct SteelImage {
@@ -24,10 +25,13 @@ impl SteelImage {
         SteelVal::Custom(Gc::new_mut(Box::new(self)))
     }
 
-    pub fn from_steelval(steelval: SteelVal) -> Result<SteelImage, String> {
+    pub fn from_steelval(steelval: SteelVal) -> Result<SteelImage, SteelErr> {
         let b = match steelval {
             SteelVal::Custom(b) => b,
-            _ => return Err(format!("Type mismatch of steel val: {:?}", steelval)),
+            _ => return Err(SteelErr::new(
+                ErrorKind::TypeMismatch,
+                format!("Type mismatch of steel val: {:?}", steelval)
+            )),
         };
 
         let guard = b.borrow();
@@ -36,9 +40,10 @@ impl SteelImage {
             .downcast_ref::<SteelImage>()
             .cloned()
             .ok_or_else(|| {
-                format!("Type mismatch: expected SteelImage, found: {}",
-                        guard.name()
-                )
+                SteelErr::new(
+                    ErrorKind::TypeMismatch,
+                format!("Type mismatch: expected SteelImage, found: {}", guard.name()
+                ))
             })
     }
 }

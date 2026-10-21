@@ -24,6 +24,7 @@ pub struct Symbols {
     avatar_initials: SteelVal,
     avatar_color_top: SteelVal,
     avatar_color_bottom: SteelVal,
+    name_color: SteelVal,
 }
 
 impl Symbols {
@@ -37,6 +38,7 @@ impl Symbols {
             avatar_initials: SteelVal::SymbolV("avatar_initials".into()),
             avatar_color_top: SteelVal::SymbolV("avatar_color_top".into()),
             avatar_color_bottom: SteelVal::SymbolV("avatar_color_bottom".into()),
+            name_color: SteelVal::SymbolV("name_color".into()),
         }
     }
 }
@@ -79,7 +81,7 @@ impl Templater {
         self.payload_map.insert(self.symbols.avatar_initials.clone(), SteelVal::StringV(initials.into()));
         
         self.payload_map.insert(self.symbols.username.clone(), SteelVal::StringV(std::mem::take(&mut msg.username).into()));
-        
+
         if let Some(status) = msg.user_status.take() {
             self.payload_map.insert(self.symbols.user_status.clone(), SteelVal::StringV(status.into()));
         }
@@ -88,7 +90,7 @@ impl Templater {
         }
 
         let content_rc = std::rc::Rc::new(std::mem::take(&mut msg.content));
-        
+
         let ctx = TextContext {
             content: content_rc.clone(),
             entities: std::rc::Rc::new(std::mem::take(&mut msg.entities))
@@ -96,7 +98,7 @@ impl Templater {
         self.payload_map.insert(self.symbols.content.clone(), SteelVal::StringV((*content_rc).clone().into()));
 
         self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
-        
+
         let (top, bottom) = Self::grad_colors(msg.grad_id as u64);
         self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(top.into()));
         self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
@@ -140,6 +142,18 @@ impl Templater {
             4 => ("#5BCBE3", "#359AD4"), // Cyan
             5 => ("#5CAFFA", "#408ACF"), // Blue
             _ => ("#FF8AAC", "#D95574"), // Pink
+        }
+    }
+
+    fn peer_color(grad_id: u64) -> &'static str {
+        match grad_id % 7 {
+            0 => "#E17076", // Red
+            1 => "#EFA65A", // Orange
+            2 => "#A695E7", // Purple
+            3 => "#7BC862", // Green
+            4 => "#6EC9CB", // Cyan
+            5 => "#65AADD", // Blue
+            _ => "#EE7AAE", // Pink
         }
     }
 }
@@ -331,7 +345,7 @@ mod tests {
         match &node.content {
             Content::Text(rich) => {
                 assert_eq!(rich.spans[0].underline, true);
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
             }
             other => panic!("Expected Text, got {:?}", other),
         }
@@ -423,14 +437,14 @@ mod tests {
 
     #[test]
     fn render_avatar_colors_all_grad_ids() {
-        let expected_tops = [
-            (0, "#FF845E"), // Red
-            (1, "#FEBB5B"), // Orange
-            (2, "#B694F9"), // Violet
-            (3, "#9AD164"), // Green
-            (4, "#5BCBE3"), // Cyan
-            (5, "#5CAFFA"), // Blue
-            (6, "#FF8AAC"), // Pink
+        let expected_tops = vec![
+            (0, "#FF845E"),
+            (1, "#FEBB5B"),
+            (2, "#B694F9"),
+            (3, "#9AD164"),
+            (4, "#5BCBE3"),
+            (5, "#5CAFFA"),
+            (6, "#FF8AAC"),
         ];
         for (grad_id, expected_top) in expected_tops {
             let mut t = Templater::new();
@@ -534,7 +548,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
                 assert!(!rich.spans[0].underline);
             }
             other => panic!("Expected Text, got {:?}", other),
@@ -554,7 +568,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
                 assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),
@@ -574,7 +588,7 @@ mod tests {
         ).unwrap();
         match &node.content {
             Content::Text(rich) => {
-                assert!(rich.spans[0].color.is_some());
+                assert!(rich.spans[0].paint.is_some());
                 assert_eq!(rich.spans[0].underline, true);
             }
             other => panic!("Expected Text, got {:?}", other),
