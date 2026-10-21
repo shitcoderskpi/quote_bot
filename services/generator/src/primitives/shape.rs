@@ -1,6 +1,6 @@
 use vello::kurbo::{BezPath, Circle, Ellipse, Rect, RoundedRect, RoundedRectRadii, Shape};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Corners {
     pub top_left: f64,
     pub top_right: f64,

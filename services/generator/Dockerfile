@@ -5,11 +5,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libfontconfig1-dev \
     libfreetype6-dev \
-    g++ \
-    cmake \
-    make \
-    clang \
-    mold \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./

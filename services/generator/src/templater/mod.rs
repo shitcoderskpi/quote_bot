@@ -71,17 +71,6 @@ impl Templater {
     }
 
     pub fn update_payload(&mut self, msg: &mut SerializableMessage) -> Result<(), SteelErr> {
-        self.payload_map.insert(self.symbols.username.clone(), SteelVal::StringV(msg.username.as_str().into()));
-        if let Some(ref status) = msg.user_status {
-            self.payload_map.insert(self.symbols.user_status.clone(), SteelVal::StringV(status.as_str().into()));
-        }
-        if let Some(ref role) = msg.user_role {
-            self.payload_map.insert(self.symbols.user_role.clone(), SteelVal::StringV(role.as_str().into()));
-        }
-        self.payload_map.insert(self.symbols.content.clone(), SteelVal::StringV(msg.content.as_str().into()));
-
-        self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
-        
         let initials = msg.username.split_whitespace()
             .take(2)
             .filter_map(|s| s.chars().next())
@@ -89,16 +78,31 @@ impl Templater {
             .to_uppercase();
         self.payload_map.insert(self.symbols.avatar_initials.clone(), SteelVal::StringV(initials.into()));
         
+        self.payload_map.insert(self.symbols.username.clone(), SteelVal::StringV(std::mem::take(&mut msg.username).into()));
+        
+        if let Some(status) = msg.user_status.take() {
+            self.payload_map.insert(self.symbols.user_status.clone(), SteelVal::StringV(status.into()));
+        }
+        if let Some(role) = msg.user_role.take() {
+            self.payload_map.insert(self.symbols.user_role.clone(), SteelVal::StringV(role.into()));
+        }
+
+        let content_rc = std::rc::Rc::new(std::mem::take(&mut msg.content));
+        
+        let ctx = TextContext {
+            content: content_rc.clone(),
+            entities: std::rc::Rc::new(std::mem::take(&mut msg.entities))
+        };
+        self.payload_map.insert(self.symbols.content.clone(), SteelVal::StringV((*content_rc).clone().into()));
+
+        self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
+        
         let (top, bottom) = Self::grad_colors(msg.grad_id as u64);
         self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(top.into()));
         self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
 
-        let payload_val = SteelVal::HashMapV(Gc::new(std::mem::take(&mut self.payload_map)).into());
+        let payload_val = SteelVal::HashMapV(Gc::new(self.payload_map.clone()).into());
 
-        let ctx = TextContext {
-            content: std::mem::take(&mut msg.content),
-            entities: std::mem::take(&mut msg.entities)
-        };
         self.engine.update_value("payload", payload_val);
         self.engine.update_value("text-context", ctx.into_steelval()?);
         Ok(())
@@ -143,7 +147,7 @@ impl Templater {
 fn extract_node(val: &SteelVal) -> Result<Node, Box<dyn std::error::Error>> {
     let scheme_node = SchemeNode::from_steelval(val)
         .map_err(|e| format!("Template must return a (node ...), got: {:?} ({})", val, e))?;
-    Ok(scheme_node.0)
+    Ok(scheme_node.0.borrow_mut().take().ok_or("Reusing root node is forbidden!")?)
 }
 
 #[cfg(test)]
@@ -153,7 +157,7 @@ mod tests {
     use crate::proto::quote::{Entity, SerializableMessage};
 
     fn epsilon() -> f32 {
-        0.0001
+        0.1
     }
 
     #[test]

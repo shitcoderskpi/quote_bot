@@ -93,6 +93,7 @@ impl RichText {
         }
     }
 
+    #[cfg(test)]
     pub fn with_span(mut self, span: Span) -> Self {
         self.spans.push(span);
         self
@@ -112,6 +113,9 @@ impl RichText {
         builder.push_default(StyleProperty::FontSize(self.default_font_size as f32));
         builder.push_default(StyleProperty::Brush(Brush::Solid(self.default_color)));
         builder.push_default(StyleProperty::FontWeight(self.default_weight));
+        builder.push_default(StyleProperty::TextWrapMode(
+            if self.wrap { parley::style::TextWrapMode::Wrap } else { parley::style::TextWrapMode::NoWrap }
+        ));
         if self.default_italic {
             builder.push_default(StyleProperty::FontStyle(parley::FontStyle::Italic));
         }
@@ -168,11 +172,7 @@ impl RichText {
         }
 
         let mut layout = builder.build(&self.text);
-        if self.wrap {
-            layout.break_all_lines(max_width.map(|w| w as f32));
-        } else {
-            layout.break_all_lines(None);
-        }
+        layout.break_all_lines(max_width.map(|w| w as f32));
 
         let alignment = match self.align {
             TextAlign::Start => Alignment::Start,

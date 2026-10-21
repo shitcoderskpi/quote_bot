@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use crate::primitives::node::{Node, Style};
 use crate::primitives::paint::Paint;
 use crate::primitives::shape::ShapeKind;
@@ -149,8 +151,8 @@ impl StyleMod {
     pub fn apply(&self, style: &mut Style) {
         match self {
             StyleMod::Direction(d) => style.layout.flex_direction = *d,
-            StyleMod::AlignItems(a) => style.layout.align_items = *a,
-            StyleMod::JustifyContent(j) => style.layout.justify_content = *j,
+            StyleMod::AlignItems(a) => style.layout.align_items = a.unwrap_or_default(),
+            StyleMod::JustifyContent(j) => style.layout.justify_content = j.unwrap_or_default(),
             StyleMod::Display(d) => style.layout.display = *d,
             StyleMod::Position(p) => style.layout.position = *p,
             StyleMod::Width(d) => style.layout.size.width = d.to_dimension(),
@@ -273,11 +275,11 @@ pub enum ShapeMod {
 impl Custom for ShapeMod {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeNode(pub Node);
+pub struct SchemeNode(pub Rc<RefCell<Option<Node>>>);
 impl Custom for SchemeNode {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeStyle(pub Style);
+pub struct SchemeStyle(pub Rc<RefCell<Option<Style>>>);
 impl Custom for SchemeStyle {}
 
 #[derive(Clone, Debug)]
@@ -286,8 +288,8 @@ impl Custom for SchemeRichText {}
 
 #[derive(Clone, Debug, Default)]
 pub struct TextContext {
-    pub content: String,
-    pub entities: Vec<crate::proto::quote::Entity>,
+    pub content: Rc<String>,
+    pub entities: Rc<Vec<crate::proto::quote::Entity>>,
 }
 impl Custom for TextContext {}
 
@@ -368,14 +370,14 @@ mod tests {
     fn style_mod_align_items() {
         let mut style = Style::default();
         StyleMod::AlignItems(Some(AlignItems::CENTER)).apply(&mut style);
-        assert_eq!(style.layout.align_items, Some(AlignItems::CENTER));
+        assert_eq!(style.layout.align_items, AlignItems::CENTER);
     }
 
     #[test]
     fn style_mod_justify_content() {
         let mut style = Style::default();
         StyleMod::JustifyContent(Some(JustifyContent::SPACE_BETWEEN)).apply(&mut style);
-        assert_eq!(style.layout.justify_content, Some(JustifyContent::SPACE_BETWEEN));
+        assert_eq!(style.layout.justify_content, JustifyContent::SPACE_BETWEEN);
     }
 
     #[test]

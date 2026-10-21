@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
@@ -484,18 +485,18 @@ fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, String> {
             .map_err(|e| format!("style: expected style modifier, got {:?} ({})", item, e))?;
         m.apply(&mut style);
     }
-    Ok(SchemeStyle(style))
+    Ok(SchemeStyle(Rc::new(std::cell::RefCell::new(Some(style)))))
 }
 fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
     let list = steel_list_to_vec(&args)?;
-    let mut style = Style::default();
+    let mut style = Rc::new(std::cell::RefCell::new(Some(Style::default())));
     let mut children: Vec<Node> = Vec::new();
 
     for item in &list {
         if let Ok(s) = SchemeStyle::from_steelval(item) {
-            style = s.0;
+            style = s.0.clone();
         } else if let Ok(n) = SchemeNode::from_steelval(item) {
-            children.push(n.0);
+            children.push(n.0.borrow_mut().take().ok_or("node: Reusing nodes is forbidden!".to_string())?);
         } else if let Ok(t) = SchemeRichText::from_steelval(item) {
             children.push(Node::text(t.0));
         } else if is_void_or_empty(item) {
@@ -511,7 +512,8 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, String> {
         _ => Content::Group(children),
     };
 
-    Ok(SchemeNode(Node { style, content }))
+    let unwrapped_style = style.borrow_mut().take().ok_or("node: Reusing styles is forbidden!")?;
+    Ok(SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node { style: unwrapped_style, content })))))
 }
 
 pub(crate) fn fn_make_text(
@@ -552,8 +554,8 @@ pub(crate) fn fn_make_text(
         m.apply(&mut rich);
     }
     
-    if let Some(base_offset) = rich.text.find(&ctx.content) {
-        for ent in ctx.entities {
+    if let Some(base_offset) = rich.text.find(ctx.content.as_str()) {
+        for ent in ctx.entities.iter() {
             let t = ent.r#type.as_str();
             let offset = base_offset + ent.offset as usize;
             let length = ent.length as usize;
@@ -605,20 +607,20 @@ fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, St
         }
     }
 
-    Ok(SchemeNode(Node {
+    Ok(SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node {
         style: Style::default(),
         content: Content::Shape { kind: kind.kind, fill, stroke },
-    }))
+    })))))
 }
 
 fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
     let image = SteelImage::from_steelval(data)?;
 
     if image.is_empty() {
-        return Ok(SchemeNode(Node {
+        return Ok(SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node {
             style: Style::default(),
             content: Content::Group(vec![]),
-        }));
+        })))));
     }
 
     let img = image::load_from_memory(image.as_slice())
@@ -643,7 +645,11 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
         None
     };
 
-    let mut node = Node::image(image_brush, clip_shape.as_ref().map(|s| s.kind.clone()));
+    let kind: Option<ShapeKind> = match clip_shape.as_ref() { 
+        Some(k) => Option::from(k.kind.clone()),
+        None => None
+    };
+    let mut node = Node::image(image_brush, kind);
     if let Some(ref shape) = clip_shape {
         if let Some(w) = shape.width {
             node.style.layout.size.width = Dimension::length(w);
@@ -652,7 +658,7 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
             node.style.layout.size.height = Dimension::length(h);
         }
     }
-    Ok(SchemeNode(node))
+    Ok(SchemeNode(Rc::new(std::cell::RefCell::new(Some(node)))))
 }
 
 fn fn_make_radial_gradient(args: SteelVal) -> Result<SchemePaint, String> {
@@ -972,7 +978,7 @@ mod tests {
     fn weight_fn() {
         let m = fn_weight(SchemeNumber(700.0));
         match m {
-            TextMod::Weight(w) => assert_eq!(w, parley::FontWeight::new(700.0)),
+            Weight(w) => assert_eq!(w, parley::FontWeight::new(700.0)),
             _ => panic!("Expected Weight"),
         }
     }
@@ -1398,7 +1404,7 @@ mod tests {
     fn make_style_empty() {
         let mods = make_steel_list(vec![]);
         let result = fn_make_style(mods).unwrap();
-        assert_eq!(result.0.opacity, 1.0);
+        assert_eq!(result.0.borrow().as_ref().unwrap().opacity, 1.0);
     }
 
     #[test]
@@ -1410,41 +1416,41 @@ mod tests {
             rotate_mod.into_steelval().unwrap(),
         ]);
         let result = fn_make_style(mods).unwrap();
-        assert!((result.0.opacity - 0.5).abs() < epsilon());
-        assert_eq!(result.0.rotate_deg, 90.0);
+        assert!((result.0.borrow().as_ref().unwrap().opacity - 0.5).abs() < epsilon());
+        assert_eq!(result.0.borrow().as_ref().unwrap().rotate_deg, 90.0);
     }
 
     #[test]
     fn make_node_empty() {
         let args = make_steel_list(vec![]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Group(ref c) if c.is_empty()));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Group(ref c) if c.is_empty()));
     }
 
     #[test]
     fn make_node_with_style_and_child() {
-        let style = SchemeStyle(Style::default()).into_steelval().unwrap();
-        let child = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let style = SchemeStyle(Rc::new(std::cell::RefCell::new(Some(Style::default())))).into_steelval().unwrap();
+        let child = SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node::shape(ShapeKind::Circle, None))))).into_steelval().unwrap();
         let args = make_steel_list(vec![style, child]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { .. }));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Shape { .. }));
     }
 
     #[test]
     fn make_node_with_multiple_children() {
-        let c1 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
-        let c2 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let c1 = SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node::shape(ShapeKind::Circle, None))))).into_steelval().unwrap();
+        let c2 = SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node::shape(ShapeKind::Circle, None))))).into_steelval().unwrap();
         let args = make_steel_list(vec![c1, c2]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Group(ref c) if c.len() == 2));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Group(ref c) if c.len() == 2));
     }
 
     #[test]
     fn make_node_skips_void() {
-        let c1 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let c1 = SchemeNode(Rc::new(std::cell::RefCell::new(Some(Node::shape(ShapeKind::Circle, None))))).into_steelval().unwrap();
         let args = make_steel_list(vec![SteelVal::Void, c1]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { .. }));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Shape { .. }));
     }
 
     #[test]
@@ -1457,7 +1463,7 @@ mod tests {
     fn make_text_basic() {
         let content = SteelVal::StringV("hello".into());
         let mods = make_steel_list(vec![]);
-        let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
+        let result = fn_make_text(content, mods, TextContext { content: Rc::from("".to_string()), entities: vec![].into() }).unwrap();
         assert_eq!(result.0.text, "hello");
     }
 
@@ -1465,15 +1471,15 @@ mod tests {
     fn make_text_error_not_string() {
         let content = SteelVal::IntV(42);
         let mods = make_steel_list(vec![]);
-        assert!(fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).is_err());
+        assert!(fn_make_text(content, mods, TextContext { content: Rc::from("".to_string()), entities: vec![].into() }).is_err());
     }
 
     #[test]
     fn make_text_with_mods() {
         let content = SteelVal::StringV("styled".into());
-        let bold = TextMod::Weight(parley::FontWeight::BOLD);
+        let bold = Weight(parley::FontWeight::BOLD);
         let mods = make_steel_list(vec![bold.into_steelval().unwrap()]);
-        let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
+        let result = fn_make_text(content, mods, TextContext { content: Rc::from("".to_string()), entities: vec![].into() }).unwrap();
         assert_eq!(result.0.default_weight, parley::FontWeight::BOLD);
     }
 
@@ -1488,8 +1494,8 @@ mod tests {
         ]);
         let result = fn_make_text(content, mods, 
                                   TextContext { 
-                                      content: "".to_string(), 
-                                      entities: vec![] })
+                                      content: Rc::from("".to_string()),
+                                      entities: vec![].into() })
             .unwrap();
         assert_eq!(result.0.text, "links");
     }
@@ -1512,8 +1518,8 @@ mod tests {
         let result = fn_make_text(
             content, mods,
             TextContext {
-                content: text.to_string(),
-                entities,
+                content: Rc::from(text.to_string()),
+                entities: Rc::from(entities),
             }
         ).unwrap();
         assert!(!result.0.spans.is_empty());
@@ -1525,7 +1531,7 @@ mod tests {
         let fill_mod = ShapeMod::Fill(Paint::solid(vello::peniko::Color::BLACK));
         let mods = make_steel_list(vec![fill_mod.into_steelval().unwrap()]);
         let result = fn_make_shape(kind, mods).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { ref fill, .. } if fill.is_some()));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Shape { ref fill, .. } if fill.is_some()));
     }
 
     #[test]
@@ -1537,7 +1543,7 @@ mod tests {
         });
         let mods = make_steel_list(vec![stroke_mod.into_steelval().unwrap()]);
         let result = fn_make_shape(kind, mods).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { ref stroke, .. } if stroke.is_some()));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Shape { ref stroke, .. } if stroke.is_some()));
     }
 
     #[test]
@@ -1549,7 +1555,7 @@ mod tests {
         let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
         let args = make_steel_list(vec![]);
         let result = fn_make_image(data, args).unwrap();
-        assert!(matches!(result.0.content, Content::Image { .. }));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Image { .. }));
     }
 
     #[test]
@@ -1562,7 +1568,7 @@ mod tests {
         let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
         let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
         let result = fn_make_image(data, args).unwrap();
-        assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));
+        assert!(matches!(result.0.borrow().as_ref().unwrap().content, Content::Image { ref clip, .. } if clip.is_some()));
     }
 
     #[test]

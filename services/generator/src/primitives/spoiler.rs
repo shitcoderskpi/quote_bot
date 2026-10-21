@@ -1,5 +1,6 @@
 use std::ops::Range;
 use parley::{GlyphRun, Run};
+use smallvec::SmallVec;
 use vello::peniko::Brush;
 use crate::primitives::text::Span;
 
@@ -19,9 +20,9 @@ pub fn spoiler_segments<'a>(
     glyph_run: &GlyphRun<Brush>,
     run: &Run<Brush>,
     spans: impl Iterator<Item = &'a Span>,
-) -> Vec<SpoilerSegment> {
+) -> SmallVec<[SpoilerSegment; 6]> {
     let run_start_x = glyph_run.offset() as f64;
-    let mut segments = Vec::new();
+    let mut segments = SmallVec::<[SpoilerSegment; 6]>::new();
 
     for span in spans {
         let mut cx = run_start_x;

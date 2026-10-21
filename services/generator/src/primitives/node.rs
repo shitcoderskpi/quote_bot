@@ -4,7 +4,7 @@ use crate::primitives::text::RichText;
 use vello::peniko::ImageBrush;
 use std::sync::Arc;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct Style {
     pub layout: taffy::Style,
     pub rotate_deg: f64,
@@ -23,7 +23,7 @@ impl Default for Style {
     }
 }
 
-#[derive(Clone)]
+
 pub enum Content {
     Shape { kind: ShapeKind, fill: Option<Paint>, stroke: Option<Stroke> },
     Text(RichText),
@@ -52,7 +52,7 @@ impl std::fmt::Debug for Content {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Node {
     pub style: Style,
     pub content: Content,

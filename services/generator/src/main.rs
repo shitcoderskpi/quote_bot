@@ -24,6 +24,7 @@ async fn process_job<'a>(
     renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
     buf: &'a mut Vec<u8>,
+    pb_buf: &mut Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message;
     let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
@@ -37,15 +38,10 @@ async fn process_job<'a>(
 
     let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
 
-    let (measured_w, measured_h) = renderer.compute_layout(&node_tree, viewport)?;
-
-    let width  = measured_w;
-    let height = measured_h;
-
+    let (width, height, root_id) = renderer.compute_layout(&node_tree, viewport)?;
     let mut scene = Scene::new();
-    let root_box = Rect::new(0.0, 0.0, width, height);
 
-    renderer.render(&mut scene, &node_tree, root_box, viewport);
+    renderer.render(&mut scene, &node_tree, root_id);
 
     let scale = dpi as f64 / 96.0;
     let scaled_width = (width * scale).ceil() as u32;
@@ -73,11 +69,13 @@ async fn process_job<'a>(
         message_id: input_msg.message_id,
         chat_id: input_msg.chat_id,
     };
-    let pb_data = result_img.encode_to_vec();
+    
+    pb_buf.clear();
+    result_img.encode(pb_buf)?;
 
-    buf.resize(compressor::max_compressed_size(pb_data.len()), 0);
+    buf.resize(compressor::max_compressed_size(pb_buf.len()), 0);
 
-    let n = compressor::compress(&pb_data, 4, buf.as_mut_slice())?;
+    let n = compressor::compress(pb_buf, 4, buf.as_mut_slice())?;
     buf.truncate(n);
 
     Ok(())
@@ -146,15 +144,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connecting to NATS at {}", cfg.nats_url);
     let mut queue = nats_queue::NatsQueue::connect(&cfg.nats_url).await?;
     let mut decmpd: Vec<u8> = Vec::new();
+    let mut pb_buf: Vec<u8> = Vec::new();
 
     loop {
         let mut cmpd: Vec<u8> = Vec::new();
-        let payload = match queue.dequeue(&cfg.queue_name).await {
-            Ok(Some(p)) => p,
-            Ok(None) => continue,
-            Err(e) => {
-                error!("Error getting job: {}", e);
-                continue;
+        
+        let payload = tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C, shutting down gracefully...");
+                break;
+            }
+            res = queue.dequeue(&cfg.queue_name) => {
+                match res {
+                    Ok(Some(p)) => p,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        error!("Error getting job: {}", e);
+                        continue;
+                    }
+                }
             }
         };
 
@@ -167,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd).await {
+        match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd, &mut pb_buf).await {
             Ok(()) => {
                 if let Err(e) = queue.enqueue(&cfg.results_queue, cmpd).await {
                     error!("Failed to enqueue result: {}", e);
@@ -178,4 +186,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => error!("Job failed: {}", e),
         }
     }
+    Ok(())
 }

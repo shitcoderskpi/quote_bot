@@ -19,10 +19,17 @@ use crate::primitives::spoiler::{SpoilerSegment, spoiler_segments};
 pub struct Renderer {
     font_cx: FontContext,
     layout_cx: LayoutContext<Brush>,
-    taffy: TaffyTree<Content>,
-    root_id: Option<NodeId>,
+    taffy: TaffyTree<usize>,
 }
 
+enum Task<'a> {
+    Enter {
+        id: NodeId,
+        node: &'a Node,
+        parent_transform: Affine,
+    },
+    PopLayer,
+}
 
 impl Renderer {
     pub fn new() -> Self {
@@ -30,15 +37,13 @@ impl Renderer {
             font_cx: FontContext::new(),
             layout_cx: LayoutContext::new(),
             taffy: TaffyTree::new(),
-            root_id: None,
         }
     }
 
     pub fn compute_layout(&mut self, node: &Node, viewport: Viewport)
-        -> Result<(f64, f64), TaffyError> {
+        -> Result<(f64, f64, NodeId), TaffyError> {
         self.taffy.clear();
-        let root_id = self.build_taffy_tree(node, viewport);
-        self.root_id = Some(root_id);
+        let root_id = self.build_taffy_tree(node);
 
         let font_cx = &mut self.font_cx;
         let layout_cx = &mut self.layout_cx;
@@ -62,26 +67,35 @@ impl Renderer {
         )?;
 
         let layout = self.taffy.layout(root_id)?;
-        Ok((layout.size.width as f64, layout.size.height as f64))
+        Ok((layout.size.width as f64, layout.size.height as f64, root_id))
     }
 
     fn measure(font_cx: &mut FontContext,
                layout_cx: &mut LayoutContext<Brush>,
-               ctx: Option<&mut Content>,
+               ctx: Option<&mut usize>,
                known_dims: Size<Option<f32>>,
                avail_space: Size<AvailableSpace>) -> Size<f32> {
-        if let Some(Content::Text(rich)) = ctx {
-            let max_width = known_dims.width.map(|w| w as f64).or_else(|| {
-                if let AvailableSpace::Definite(w) = avail_space.width {
-                    Some(w as f64)
-                } else {
-                    None
-                }
-            });
 
-            let layout = rich.layout(font_cx, layout_cx, max_width);
-            Size { width: layout.width(), height: layout.height() }
-        } else if let Some(Content::Image { image, .. }) = ctx {
+        // SAFETY: The usize stored in the Taffy context is a raw pointer to the Context struct
+        // created synchronously in `build_taffy_tree` from the `node: &Node` reference passed to `compute_layout`.
+        // The `node` reference is guaranteed to outlive the `compute_layout_with_measure` call.
+        // `self.taffy.clear()` ensures no stale pointers from previous layouts remain in the tree.
+        // Thus, dereferencing this pointer during measure is always valid and will never hit freed memory.
+        let content = ctx.map(|ptr| unsafe { &*(*ptr as *const Content) });
+
+        if let Some(Content::Text(rich)) = content {
+            let max_width = match known_dims.width {
+                Some(w) => Some(w),
+                None => match avail_space.width {
+                    AvailableSpace::Definite(w) => Some(w),
+                    AvailableSpace::MinContent => Some(0.0),
+                    AvailableSpace::MaxContent => None,
+                },
+            };
+
+            let layout = rich.layout(font_cx, layout_cx, max_width.map(|w| w as f64));
+            Size { width: layout.width().ceil(), height: layout.height().ceil() }
+        } else if let Some(Content::Image { image, .. }) = content {
             let iw = image.image.width as f32;
             let ih = image.image.height as f32;
             Size { width: iw, height: ih }
@@ -90,85 +104,121 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, scene: &mut Scene, node: &Node, _root_box: KRect, viewport: Viewport) {
-        if let Some(root_id) = self.root_id {
-            self.render_taffy_tree(scene, root_id, node, Affine::IDENTITY, viewport, 16.0);
-        }
+    pub fn render(&mut self, scene: &mut Scene, node: &Node, root_id: NodeId) {
+        self.render_taffy_tree(scene, root_id, node, Affine::IDENTITY);
     }
 
-    fn build_taffy_tree(&mut self, node: &Node, viewport: Viewport) -> NodeId {
-        let style = node.style.layout.clone();
+    fn build_taffy_tree(&mut self, node: &Node) -> NodeId {
+        let style = &node.style.layout;
+        let content_ptr = &node.content as *const Content as usize;
 
         match &node.content {
             Content::Group(children) => {
                 let mut child_ids = Vec::with_capacity(children.len());
                 for c in children {
-                    child_ids.push(self.build_taffy_tree(c, viewport));
+                    child_ids.push(self.build_taffy_tree(c));
                 }
-                self.taffy.new_with_children(style, &child_ids).unwrap()
+                self.taffy.new_with_children(style.clone(), &child_ids).unwrap()
             }
-            Content::Text(_) => {
-                self.taffy.new_leaf_with_context(style, node.content.clone()).unwrap()
-            }
-            Content::Image { .. } => {
-                self.taffy.new_leaf_with_context(style, node.content.clone()).unwrap()
+            Content::Text(_) | Content::Image { .. } => {
+                self.taffy.new_leaf_with_context(style.clone(), content_ptr).unwrap()
             }
             _ => {
-                self.taffy.new_leaf(style).unwrap()
+                self.taffy.new_leaf(style.clone()).unwrap()
             }
         }
     }
 
-    fn render_taffy_tree(&mut self, scene: &mut Scene, id: NodeId, node: &Node, parent_transform: Affine, viewport: Viewport, font_size: f64) {
-        let layout = self.taffy.layout(id).unwrap();
+    fn render_taffy_tree<'a>(
+        &mut self,
+        scene: &mut Scene,
+        root_id: NodeId,
+        root_node: &'a Node,
+        parent_transform: Affine
+    ) {
+        const TOLERANCE: f64 = 0.01;
 
-        let x = layout.location.x as f64;
-        let y = layout.location.y as f64;
-        let w = layout.size.width as f64;
-        let h = layout.size.height as f64;
+        let mut stack: Vec<Task<'a>> = vec![Task::Enter {
+            id: root_id,
+            node: root_node,
+            parent_transform,
+        }];
 
-        let center = Affine::translate((x + w / 2.0, y + h / 2.0));
-        let rotate = Affine::rotate(node.style.rotate_deg.to_radians());
-        let local = center * rotate * Affine::translate((-w / 2.0, -h / 2.0));
-        let transform = parent_transform * local;
-
-        let needs_layer = node.style.clip.is_some() || node.style.opacity < 1.0;
-        if needs_layer {
-            let clip_shape = node.style.clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.1));
-            scene.push_layer(Fill::NonZero, BlendMode::default(), node.style.opacity, transform, &clip_shape);
-        }
-
-        match &node.content {
-            Content::Shape { kind, fill, stroke } => {
-                let path = kind.to_kurbo(w, h);
-                if let Some(paint) = fill {
-                    let brush = paint.to_brush(w, h);
-                    scene.fill(Fill::NonZero, transform, &brush, None, &path);
+        while let Some(task) = stack.pop() {
+            let (id, node, parent_transform) = match task {
+                Task::PopLayer => {
+                    scene.pop_layer();
+                    continue;
                 }
-                if let Some(s) = stroke {
-                    let kstroke = KStroke::new(s.width);
-                    scene.stroke(&kstroke, transform, s.color, None, &path);
-                }
-            }
-            Content::Text(rich) => {
-                let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w));
-                draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style);
-            }
-            Content::Image { image, clip } => {
-                let clip_shape = clip.as_ref().map(|c| c.to_kurbo(w, h)).unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(0.01));
-                let brush_transform = cover_fit_transform(image, w, h);
-                scene.fill(Fill::NonZero, transform, &Brush::Image(image.as_ref().clone()), Some(brush_transform), &clip_shape);
-            }
-            Content::Group(children) => {
-                let child_ids = self.taffy.children(id).unwrap();
-                for (child, child_id) in children.iter().zip(child_ids.iter()) {
-                    self.render_taffy_tree(scene, *child_id, child, transform, viewport, font_size);
-                }
-            }
-        }
+                Task::Enter { id, node, parent_transform } => (id, node, parent_transform),
+            };
 
-        if needs_layer {
-            scene.pop_layer();
+            let layout = self.taffy.layout(id).unwrap();
+            let x = layout.location.x as f64;
+            let y = layout.location.y as f64;
+            let w = layout.size.width as f64;
+            let h = layout.size.height as f64;
+
+            let center = Affine::translate((x + w / 2.0, y + h / 2.0));
+            let rotate = Affine::rotate(node.style.rotate_deg.to_radians());
+            let local = center * rotate * Affine::translate((-w / 2.0, -h / 2.0));
+            let transform = parent_transform * local;
+
+            let needs_layer = node.style.clip.is_some() || node.style.opacity < 1.0;
+            if needs_layer {
+                let clip_shape = node.style.clip.as_ref()
+                    .map(|c| c.to_kurbo(w, h))
+                    .unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(TOLERANCE));
+                scene.push_layer(
+                    Fill::NonZero,
+                    BlendMode::default(),
+                    node.style.opacity,
+                    transform,
+                    &clip_shape,
+                );
+                stack.push(Task::PopLayer);
+            }
+
+            match &node.content {
+                Content::Shape { kind, fill, stroke } => {
+                    let path = kind.to_kurbo(w, h);
+                    if let Some(paint) = fill {
+                        let brush = paint.to_brush(w, h);
+                        scene.fill(Fill::NonZero, transform, &brush, None, &path);
+                    }
+                    if let Some(s) = stroke {
+                        let kstroke = KStroke::new(s.width);
+                        scene.stroke(&kstroke, transform, s.color, None, &path);
+                    }
+                }
+                Content::Text(rich) => {
+                    let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w));
+                    draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style);
+                }
+                Content::Image { image, clip } => {
+                    let clip_shape = clip.as_ref()
+                        .map(|c| c.to_kurbo(w, h))
+                        .unwrap_or_else(|| KRect::new(0.0, 0.0, w, h).into_path(TOLERANCE));
+                    let brush_transform = cover_fit_transform(image, w, h);
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        &Brush::Image(image.as_ref().clone()),
+                        Some(brush_transform),
+                        &clip_shape,
+                    );
+                }
+                Content::Group(children) => {
+                    let child_ids = self.taffy.children(id).unwrap();
+                    for (child, child_id) in children.iter().zip(child_ids.iter()).rev() {
+                        stack.push(Task::Enter {
+                            id: *child_id,
+                            node: child,
+                            parent_transform: transform,
+                        });
+                    }
+                }
+            }
         }
     }
 }
@@ -232,7 +282,14 @@ fn draw_text(scene: &mut Scene,
     let y = glyph_run.baseline() as f64;
     let font = run.font();
     let font_size = run.font_size();
-    let coords = run.normalized_coords();
+    let src = run.normalized_coords();
+    // SAFETY: parlance::normalized_coord::NormalizedCoord is 16-bit number underneath:
+    // SEE: https://docs.rs/parlance/0.1.1/parlance/struct.NormalizedCoord.html
+    //      https://docs.rs/vello/0.11.0/vello/type.NormalizedCoord.html
+    // Both of these types use 2.14 fixed-point fractional number format.
+    let coords: &[i16] = unsafe {
+        std::slice::from_raw_parts(src.as_ptr().cast::<i16>(), src.len())
+    };
 
     scene.draw_glyphs(font)
         .brush(&glyph_run.style().brush)
@@ -263,8 +320,8 @@ fn draw_text(scene: &mut Scene,
     let start_x = glyph_run.offset() as f64;
 
     if let Some(underline) = style.underline.as_ref() {
-        let offset = underline.offset.unwrap_or(run.metrics().underline_offset) as f64;
-        let size = underline.size.unwrap_or(run.metrics().underline_size) as f64;
+        let offset = underline.offset.unwrap_or(run.font_metrics().underline_offset) as f64;
+        let size = underline.size.unwrap_or(run.font_metrics().underline_size) as f64;
         let y_pos = y - offset;
         let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0,
                                            start_x + run_width as f64,
@@ -274,8 +331,8 @@ fn draw_text(scene: &mut Scene,
     }
 
     if let Some(strikethrough) = style.strikethrough.as_ref() {
-        let offset = strikethrough.offset.unwrap_or(run.metrics().strikethrough_offset) as f64;
-        let size = strikethrough.size.unwrap_or(run.metrics().strikethrough_size) as f64;
+        let offset = strikethrough.offset.unwrap_or(run.font_metrics().strikethrough_offset) as f64;
+        let size = strikethrough.size.unwrap_or(run.font_metrics().strikethrough_size) as f64;
         let y_pos = y - offset;
         let rect = vello::kurbo::Rect::new(start_x, y_pos - size / 2.0,
                                            start_x + run_width as f64,
@@ -296,7 +353,7 @@ fn draw_spoiler_tg(scene: &mut Scene,
                    segments: &[SpoilerSegment],
                    opacity_mod: f32,
 ) {
-    let metrics = run.metrics();
+    let metrics = run.font_metrics();
     let font_size = run.font_size();
     let baseline_y = (glyph_run.baseline() - metrics.ascent) as f64;
     let h = (metrics.ascent + metrics.descent) as f64;
@@ -488,7 +545,7 @@ mod tests {
     fn compute_layout_explicit_size() {
         let node = shaped_node(120.0, 80.0);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&node, vp()).unwrap();
         assert!((w - 120.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 80.0).abs() < epsilon(), "h = {}", h);
     }
@@ -506,7 +563,7 @@ mod tests {
             ]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&group, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&group, vp()).unwrap();
         assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
@@ -524,7 +581,7 @@ mod tests {
             ]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&group, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&group, vp()).unwrap();
         assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
@@ -540,7 +597,7 @@ mod tests {
             content: Content::Group(vec![inner]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&outer, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&outer, vp()).unwrap();
         assert!((w - 60.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 40.0).abs() < epsilon(), "h = {}", h);
     }
@@ -561,7 +618,7 @@ mod tests {
             content: Content::Group(vec![]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&node, vp()).unwrap();
         assert!((w - 100.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 100.0).abs() < epsilon(), "h = {}", h);
     }
@@ -571,7 +628,7 @@ mod tests {
         let rt = RichText::plain("Hello World");
         let node = Node::text(rt);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&node, vp()).unwrap();
         assert!(w > 0.0, "text width should be > 0, got {}", w);
         assert!(h > 0.0, "text height should be > 0, got {}", h);
     }
@@ -580,11 +637,10 @@ mod tests {
     fn render_does_not_panic_with_valid_tree() {
         let node = shaped_node(100.0, 50.0);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (_, _, root_id) = renderer.compute_layout(&node, vp()).unwrap();
 
         let mut scene = Scene::new();
-        let root_box = KRect::new(0.0, 0.0, w, h);
-        renderer.render(&mut scene, &node, root_box, vp());
+        renderer.render(&mut scene, &node, root_id);
     }
 
     #[test]
@@ -600,10 +656,9 @@ mod tests {
             ]),
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&group, vp()).unwrap();
+        let (_, _, root_id) = renderer.compute_layout(&group, vp()).unwrap();
         let mut scene = Scene::new();
-        let root_box = KRect::new(0.0, 0.0, w, h);
-        renderer.render(&mut scene, &group, root_box, vp());
+        renderer.render(&mut scene, &group, root_id);
     }
 
     #[test]
@@ -615,17 +670,17 @@ mod tests {
             style,
             content: Content::Shape {
                 kind: ShapeKind::Rect { corners: Corners::zero() },
-                fill: Some(Paint::solid(vello::peniko::Color::BLACK)),
+                fill: Some(Paint::solid(Color::BLACK)),
                 stroke: Some(crate::primitives::paint::Stroke {
                     width: 2.0,
-                    color: vello::peniko::Color::WHITE,
+                    color: Color::WHITE,
                 }),
             },
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (_, _, root_id) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
-        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+        renderer.render(&mut scene, &node, root_id);
     }
 
     #[test]
@@ -639,9 +694,9 @@ mod tests {
             content: Content::Image { image: brush, clip: Some(ShapeKind::Circle) },
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (_, _, root_id) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
-        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+        renderer.render(&mut scene, &node, root_id);
     }
 
     #[test]
@@ -652,9 +707,9 @@ mod tests {
         style.opacity = 0.5;
         let node = make_node(style);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (_, _, root_id) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
-        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+        renderer.render(&mut scene, &node, root_id);
     }
 
     fn make_node(style: Style) -> Node {
@@ -662,7 +717,7 @@ mod tests {
             style,
             content: Content::Shape {
                 kind: ShapeKind::Rect { corners: Corners::zero() },
-                fill: Some(Paint::solid(vello::peniko::Color::BLACK)),
+                fill: Some(Paint::solid(Color::BLACK)),
                 stroke: None,
             },
         }
@@ -676,9 +731,9 @@ mod tests {
         style.clip = Some(ShapeKind::Circle);
         let node = make_node(style);
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (_, _, root_id) = renderer.compute_layout(&node, vp()).unwrap();
         let mut scene = Scene::new();
-        renderer.render(&mut scene, &node, KRect::new(0.0, 0.0, w, h), vp());
+        renderer.render(&mut scene, &node, root_id);
     }
 
     #[test]
@@ -689,7 +744,7 @@ mod tests {
             content: Content::Image { image: brush, clip: None },
         };
         let mut renderer = Renderer::new();
-        let (w, h) = renderer.compute_layout(&node, vp()).unwrap();
+        let (w, h, _) = renderer.compute_layout(&node, vp()).unwrap();
         assert!((w - 120.0).abs() < epsilon(), "w = {}", w);
         assert!((h - 80.0).abs() < epsilon(), "h = {}", h);
     }

@@ -1,39 +1,66 @@
 import argparse
-import json
+import asyncio
 import os
+import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from io import BytesIO
+from itertools import count
 from typing import Optional
 
-import asyncio
 import nats
-from nats.errors import TimeoutError
 import zstandard as zstd
+from nats.errors import TimeoutError as NatsTimeout
+from nats.js.errors import BadRequestError
 
 import quote_pb2
 
 NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 JOBS_QUEUE = "generate:jobs"
 RESULTS_QUEUE = "generate:results"
+PUBLISH_CHUNK = 500
+PROBE_INTERVAL = 5.0
+WEBP_MAGIC_RIFF = b"RIFF"
+WEBP_MAGIC_TAG = b"WEBP"
 
 compressor = zstd.ZstdCompressor(level=9)
 decompressor = zstd.ZstdDecompressor()
+message_ids = count(1)
+
+
+class Colors:
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+
+
+def paint(color: str, text: str) -> str:
+    return f"{color}{text}{Colors.RESET}"
 
 
 @dataclass
 class FakeMessage:
     grad_id: int
     username: str
-    user_status: Optional[str]
-    user_role: Optional[str]
     content: str
+    user_status: Optional[str] = None
+    user_role: Optional[str] = "member"
     entities: list = field(default_factory=list)
-    image_bytes: bytes = b""
-    header: dict = field(default_factory=dict)
+    image_bytes: Optional[bytes] = None
+    chat_id: int = 123456789
+    message_id: int = field(default_factory=lambda: next(message_ids))
     dpi: Optional[int] = None
     theme: str = "light"
+
+    def __post_init__(self):
+        for ent in self.entities:
+            if ent["offset"] < 0 or ent["offset"] + ent["length"] > len(self.content):
+                raise ValueError(f"entity out of range: {ent} in {self.content!r}")
 
     def to_protobuf_bytes(self) -> bytes:
         msg = quote_pb2.SerializableMessage()
@@ -50,86 +77,234 @@ class FakeMessage:
             msg.dpi = self.dpi
         if self.theme != "light":
             msg.theme = self.theme
-
-        if self.header:
-            msg.message_id = self.header.get("message_id", 0)
-            msg.chat_id = self.header.get("chat", {}).get("id", 0)
-
+        msg.message_id = self.message_id
+        msg.chat_id = self.chat_id
         for ent in self.entities:
             pb_ent = msg.entities.add()
             pb_ent.type = ent["type"]
             pb_ent.offset = ent["offset"]
             pb_ent.length = ent["length"]
-
         return msg.SerializeToString()
 
+    def to_job(self) -> bytes:
+        return compressor.compress(self.to_protobuf_bytes())
 
-def make_header(chat_id: int = 123456789, message_id: int = 42) -> dict:
-    return {"message_id": message_id, "chat": {"id": chat_id}}
+
+def build_tests() -> dict[str, FakeMessage]:
+    return {
+        "basic": FakeMessage(
+            grad_id=3,
+            username="Test User",
+            content="Hello, this is a test message!",
+        ),
+        "dark_theme": FakeMessage(
+            grad_id=5,
+            username="Dark Mode Fan",
+            user_status="Premium",
+            user_role="administrator",
+            content="Testing dark theme rendering",
+            chat_id=111111111,
+            theme="dark",
+        ),
+        "custom_dpi": FakeMessage(
+            grad_id=1,
+            username="Hi-DPI User",
+            content="Rendering at 150 DPI",
+            dpi=150,
+        ),
+        "with_entities": FakeMessage(
+            grad_id=2,
+            username="Entity User",
+            content="Hello bold and italic world",
+            entities=[
+                {"type": "bold", "offset": 6, "length": 4},
+                {"type": "italic", "offset": 15, "length": 6},
+            ],
+        ),
+        "more_entities": FakeMessage(
+            grad_id=3,
+            username="More Entities User",
+            content="Spoiler text, code here, and underline!",
+            entities=[
+                {"type": "spoiler", "offset": 0, "length": 7},
+                {"type": "code", "offset": 14, "length": 9},
+                {"type": "underline", "offset": 29, "length": 9},
+            ],
+        ),
+        "all_entities": FakeMessage(
+            grad_id=4,
+            username="All Entities",
+            content="b i u s code pre spoiler link mention emoji",
+            entities=[
+                {"type": "bold", "offset": 0, "length": 1},
+                {"type": "italic", "offset": 2, "length": 1},
+                {"type": "underline", "offset": 4, "length": 1},
+                {"type": "strikethrough", "offset": 6, "length": 1},
+                {"type": "code", "offset": 8, "length": 4},
+                {"type": "pre", "offset": 13, "length": 3},
+                {"type": "spoiler", "offset": 17, "length": 7},
+                {"type": "text_link", "offset": 25, "length": 4},
+                {"type": "mention", "offset": 30, "length": 7},
+                {"type": "custom_emoji", "offset": 38, "length": 5},
+            ],
+        ),
+        "long_text": FakeMessage(
+            grad_id=6,
+            username="Verbose User",
+            user_status="Long statusgvgv",
+            content=(
+                "This is a much longer message to test word wrapping and layout. "
+                "The generator should handle multi-line text gracefully and produce "
+                "a properly sized output image. Let's see how it does with a few "
+                "more sentences to really push the wrapping logic. 🚀✨🔥"
+            ),
+        ),
+        "no_avatar": FakeMessage(
+            grad_id=4,
+            username="No Avatar User",
+            content="User without a profile photo",
+            image_bytes=b"",
+        ),
+    }
 
 
-TESTS: dict[str, FakeMessage] = {
-    "basic": FakeMessage(
-        grad_id=3,
-        username="Test User",
-        user_status=None,
-        user_role="member",
-        content="Hello, this is a test message!",
-        header=make_header(),
-        image_bytes=None,
-    ),
-    "dark_theme": FakeMessage(
-        grad_id=5,
-        username="Dark Mode Fan",
-        user_status="Premium",
-        user_role="administrator",
-        content="Testing dark theme rendering",
-        header=make_header(chat_id=111111111),
-        image_bytes=None,
-        theme="dark",
-    ),
-    "custom_dpi": FakeMessage(
-        grad_id=1,
-        username="Hi-DPI User",
-        user_status=None,
-        user_role="member",
-        content="Rendering at 150 DPI",
-        header=make_header(),
-        image_bytes=None,
-        dpi=150,
-    ),
-    "with_entities": FakeMessage(
-        grad_id=2,
-        username="Entity User",
-        user_status=None,
-        user_role="member",
-        content="Hello bold and italic world",
-        entities=[
-            {"type": "bold", "offset": 6, "length": 4},
-            {"type": "italic", "offset": 15, "length": 6},
-        ],
-        header=make_header(),
-        image_bytes=None,
-    ),
-    "more_entities": FakeMessage(
-        grad_id=3,
-        username="More Entities User",
-        user_status=None,
-        user_role="member",
-        content="Spoiler text, code here, and underline!",
-        entities=[
-            {"type": "spoiler", "offset": 0, "length": 7},
-            {"type": "code", "offset": 14, "length": 9},
-            {"type": "underline", "offset": 29, "length": 9},
-        ],
-        header=make_header(),
-        image_bytes=None,
-    ),
-    "all_entities": FakeMessage(
+def is_webp(data: bytes) -> bool:
+    return data[:4] == WEBP_MAGIC_RIFF and data[8:12] == WEBP_MAGIC_TAG
+
+
+def decode_result(raw: bytes) -> "quote_pb2.ResultImage":
+    result = quote_pb2.ResultImage()
+    result.ParseFromString(decompressor.decompress(raw))
+    return result
+
+
+async def await_result(sub, message_id: int, deadline: float):
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise NatsTimeout()
+        raw = (await sub.next_msg(timeout=remaining)).data
+        try:
+            result = decode_result(raw)
+        except Exception:
+            return raw, None
+        if result.message_id == message_id:
+            return raw, result
+
+
+async def run_test(
+    nc, js, name: str, msg: FakeMessage, timeout: float, output_dir: Optional[str]
+) -> bool:
+    print(f"\n{'-' * 60}")
+    print(f"  {Colors.BOLD}{Colors.CYAN}TEST: {name}{Colors.RESET}")
+    print(f"{'-' * 60}")
+    print(f"  username : {msg.username}")
+    print(f"  content  : {msg.content[:60]}{'...' if len(msg.content) > 60 else ''}")
+    print(f"  theme    : {msg.theme}")
+    print(f"  dpi      : {msg.dpi or 'default'}")
+    print(
+        f"  avatar   : {'yes' if msg.image_bytes else 'no'} ({len(msg.image_bytes or b'')} bytes)"
+    )
+    print(f"  entities : {len(msg.entities)}")
+
+    payload = msg.to_protobuf_bytes()
+    compressed = compressor.compress(payload)
+    print(
+        f"\n  {paint(Colors.DIM, f'Payload   : {len(payload)} bytes PB -> {len(compressed)} bytes zstd')}"
+    )
+
+    sub = await nc.subscribe(RESULTS_QUEUE)
+    try:
+        t0 = time.monotonic()
+        await js.publish(JOBS_QUEUE, compressed)
+        print(f"  {paint(Colors.DIM, f'Pushed to : {JOBS_QUEUE}')}")
+        print(
+            f"  {paint(Colors.DIM, f'Waiting   : (timeout {timeout}s) ...')}",
+            end="",
+            flush=True,
+        )
+
+        try:
+            raw, result = await await_result(sub, msg.message_id, t0 + timeout)
+        except NatsTimeout:
+            print(f"\r  {paint(Colors.RED, f'TIMEOUT - no response in {timeout}s')}")
+            return False
+        elapsed_ms = (time.monotonic() - t0) * 1000
+    finally:
+        await sub.unsubscribe()
+
+    print(
+        f"\r  {paint(Colors.DIM, f'Got result: {len(raw)} bytes in {elapsed_ms:.0f} ms')}    "
+    )
+
+    if result is None:
+        print(f"  {paint(Colors.RED, 'DECOMPRESS/PARSE FAILED')}")
+        return False
+
+    if not result.image:
+        print(f"  {paint(Colors.RED, 'Missing image in response')}")
+        return False
+
+    img = result.image
+    ok = True
+
+    if result.chat_id != msg.chat_id:
+        print(
+            f"  {paint(Colors.RED, f'chat_id mismatch: expected {msg.chat_id}, got {result.chat_id}')}"
+        )
+        ok = False
+
+    webp = is_webp(img)
+    print(
+        f"  {paint(Colors.DIM, f'Image     : {len(img)} bytes ({'WebP' if webp else 'unknown'})')}"
+    )
+    print(
+        f"  {paint(Colors.DIM, f'Header    : chat_id={result.chat_id} message_id={result.message_id}')}"
+    )
+    print(f"  {paint(Colors.DIM, f'Roundtrip : {elapsed_ms:.0f} ms')}")
+
+    if not webp:
+        print(f"  {paint(Colors.RED, 'Image does not have WebP magic bytes')}")
+        ok = False
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        out_path = os.path.join(output_dir, f"{name}.webp")
+        with open(out_path, "wb") as f:
+            f.write(img)
+        print(f"  {paint(Colors.DIM, f'Saved to  : {out_path}')}")
+
+    if ok:
+        print(f"  {paint(Colors.GREEN, 'PASSED')} ({elapsed_ms:.0f} ms)")
+    else:
+        print(f"  {paint(Colors.RED, 'FAILED')}")
+    return ok
+
+
+async def run_load_test(nc, js, total: int, idle_timeout: float) -> bool:
+    print(
+        f"\n{paint(Colors.BOLD + Colors.CYAN, f'Starting Load Test: {total} messages')}"
+    )
+
+    received = 0
+    last_activity = time.monotonic()
+    finished_at = 0.0
+    done = asyncio.Event()
+
+    async def on_result(_):
+        nonlocal received, last_activity, finished_at
+        received += 1
+        last_activity = time.monotonic()
+        if received % 1000 == 0:
+            print(f"  Received {received} / {total} results...")
+        if received >= total:
+            finished_at = last_activity
+            done.set()
+
+    sub = await nc.subscribe(RESULTS_QUEUE, cb=on_result)
+    job = FakeMessage(
         grad_id=4,
         username="All Entities",
-        user_status=None,
-        user_role="member",
         content="b i u s code pre spoiler link mention emoji",
         entities=[
             {"type": "bold", "offset": 0, "length": 1},
@@ -143,219 +318,239 @@ TESTS: dict[str, FakeMessage] = {
             {"type": "mention", "offset": 30, "length": 7},
             {"type": "custom_emoji", "offset": 38, "length": 5},
         ],
-        header=make_header(),
-        image_bytes=None,
-    ),
-    "long_text": FakeMessage(
-        grad_id=6,
-        username="Verbose User",
-        user_status="jkbkjkijbknbkj",
-        user_role="member",
-        content=(
-            "This is a much longer message to test word wrapping and layout. "
-            "The generator should handle multi-line text gracefully and produce "
-            "a properly sized output image. Let's see how it does with a few "
-            "more sentences to really push the wrapping logic. 🚀✨🔥"
-        ),
-        header=make_header(),
-        image_bytes=None,
-    ),
-    "no_avatar": FakeMessage(
-        grad_id=4,
-        username="No Avatar User",
-        user_status=None,
-        user_role="member",
-        content="User without a profile photo",
-        header=make_header(),
-        image_bytes=b"",
-    ),
-}
-
-
-class Colors:
-    GREEN = "\033[92m"
-    RED = "\033[91m"
-    YELLOW = "\033[93m"
-    CYAN = "\033[96m"
-    DIM = "\033[2m"
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-
-
-async def run_test(
-    nc,
-    js,
-    name: str,
-    msg: FakeMessage,
-    timeout: int,
-    save_images: bool,
-    output_dir: str,
-) -> bool:
-    print(f"\n{'-'* 60}")
-    print(f"  {Colors.BOLD}{Colors.CYAN}TEST: {name}{Colors.RESET}")
-    print(f"{'-' * 60}")
-    print(f"  username : {msg.username}")
-    print(f"  content  : {msg.content[:60]}{'...' if len(msg.content) > 60 else ''}")
-    print(f"  theme    : {msg.theme}")
-    print(f"  dpi      : {msg.dpi or 'default'}")
-    print(f"  avatar   : {'yes' if msg.image_bytes else 'no'} ({0} bytes)")
-    print(f"  entities : {len(msg.entities)}")
-
-    payload = msg.to_protobuf_bytes()
-    compressed = compressor.compress(payload)
-
-    print(
-        f"\n  {Colors.DIM}Payload   : {len(payload)} bytes PB -> {len(compressed)} bytes zstd{Colors.RESET}"
-    )
-    
-    sub = await nc.subscribe(RESULTS_QUEUE)
-    t0 = time.monotonic()
-    await js.publish(JOBS_QUEUE, compressed)
-    print(f"  {Colors.DIM}Pushed to : {JOBS_QUEUE}{Colors.RESET}")
-
-    print(
-        f"  {Colors.DIM}Waiting   : (timeout {timeout}s) ...{Colors.RESET}",
-        end="",
-        flush=True,
-    )
-    
-    try:
-        result = await sub.next_msg(timeout=timeout)
-        elapsed_ms = (time.monotonic() - t0) * 1000
-    except TimeoutError:
-        print(f"\r  {Colors.RED}TIMEOUT - no response in {timeout}s{Colors.RESET}")
-        await sub.unsubscribe()
-        return False
-
-    raw_result = result.data
-    await sub.unsubscribe()
-    print(
-        f"\r  {Colors.DIM}Got result: {len(raw_result)} bytes in {elapsed_ms:.0f} ms{Colors.RESET}    "
-    )
+    ).to_job()
 
     try:
-        decompressed = decompressor.decompress(raw_result)
-        result_msg = quote_pb2.ResultImage()
-        result_msg.ParseFromString(decompressed)
-    except Exception as e:
-        print(f"  {Colors.RED}DECOMPRESS/PARSE FAILED: {e}{Colors.RESET}")
-        return False
+        print(f"Publishing {total} jobs to '{JOBS_QUEUE}'...")
+        start = time.monotonic()
+        published = 0
+        while published < total:
+            batch = min(PUBLISH_CHUNK, total - published)
+            await asyncio.gather(*(js.publish(JOBS_QUEUE, job) for _ in range(batch)))
+            published += batch
+            if published % 1000 < PUBLISH_CHUNK:
+                print(f"  Published {published} / {total}...")
 
-    if not result_msg.image:
-        print(f"  {Colors.RED}Missing 'image' in response{Colors.RESET}")
-        return False
-
-    img = result_msg.image
-
-    if msg.header:
-        expected_chat_id = msg.header.get("chat", {}).get("id")
-        actual_chat_id = result_msg.chat_id
-        if expected_chat_id != actual_chat_id:
-            print(
-                f"  {Colors.YELLOW}Header chat_id mismatch: expected {expected_chat_id}, got {actual_chat_id}{Colors.RESET}"
+        print(
+            paint(
+                Colors.YELLOW,
+                "All jobs published. Waiting for generator to finish processing...",
             )
+        )
+        last_activity = time.monotonic()
+        while not done.is_set() and time.monotonic() - last_activity < idle_timeout:
+            try:
+                await asyncio.wait_for(done.wait(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        await sub.unsubscribe()
 
-    is_webp = img[:4] == b"RIFF" and img[8:12] == b"WEBP"
-    fmt_str = "WebP" if is_webp else "unknown"
+    if received < total:
+        print(
+            paint(
+                Colors.RED, f"Timeout waiting for results! Received {received}/{total}"
+            )
+        )
+        return False
 
-    print(f"  {Colors.DIM}Image     : {len(img)} bytes ({fmt_str}){Colors.RESET}")
+    elapsed = finished_at - start
     print(
-        f"  {Colors.DIM}Header    : chat_id={result_msg.chat_id} message_id={result_msg.message_id}{Colors.RESET}"
+        paint(
+            Colors.GREEN,
+            f"Successfully processed {total} jobs in {elapsed:.2f} seconds ({total / elapsed:.1f} msg/s).",
+        )
     )
-    print(f"  {Colors.DIM}Roundtrip : {elapsed_ms:.0f} ms{Colors.RESET}")
-
-    if not is_webp:
-        print(f"  {Colors.YELLOW}Image doesn't have WebP magic bytes{Colors.RESET}")
-
-    if save_images:
-        os.makedirs(output_dir, exist_ok=True)
-        out_path = os.path.join(output_dir, f"{name}.webp")
-        with open(out_path, "wb") as f:
-            f.write(img)
-        print(f"  {Colors.DIM}Saved to  : {out_path}{Colors.RESET}")
-
-    print(f"  {Colors.GREEN}PASSED{Colors.RESET} ({elapsed_ms:.0f} ms)")
     return True
 
 
-async def main():
+def start_flamegraph() -> subprocess.Popen:
+    env = os.environ.copy()
+    env.setdefault("TEMPLATE", "templates")
+    print(
+        paint(
+            Colors.YELLOW,
+            "Starting cargo flamegraph... (this may take a moment to build)",
+        )
+    )
+    return subprocess.Popen(
+        ["cargo", "flamegraph"],
+        cwd="services/generator",
+        env=env,
+        start_new_session=True,
+    )
+
+
+def signal_group(proc: subprocess.Popen, sig: int):
+    try:
+        os.killpg(proc.pid, sig)
+    except ProcessLookupError:
+        pass
+
+
+async def stop_flamegraph(proc: subprocess.Popen, grace: float = 60.0):
+    print(paint(Colors.YELLOW, "Stopping cargo flamegraph to generate SVG..."))
+    signal_group(proc, signal.SIGINT)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=grace)
+    except asyncio.TimeoutError:
+        print(paint(Colors.RED, "Flamegraph did not exit in time, terminating"))
+        signal_group(proc, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=10)
+        except asyncio.TimeoutError:
+            signal_group(proc, signal.SIGKILL)
+            await asyncio.to_thread(proc.wait)
+        return
+    print(
+        paint(Colors.GREEN, "Flamegraph generated at services/generator/flamegraph.svg")
+    )
+
+
+async def wait_until_ready(
+    nc, js, proc: Optional[subprocess.Popen], timeout: float
+) -> bool:
+    print(
+        paint(
+            Colors.YELLOW, f"Waiting for generator to come up (up to {timeout:g}s)..."
+        )
+    )
+    started = time.monotonic()
+    deadline = started + timeout
+    sub = await nc.subscribe(RESULTS_QUEUE)
+    try:
+        while True:
+            if proc is not None and proc.poll() is not None:
+                print(
+                    paint(
+                        Colors.RED,
+                        f"Generator process exited early with code {proc.returncode}",
+                    )
+                )
+                return False
+            now = time.monotonic()
+            if now >= deadline:
+                print(paint(Colors.RED, "Timed out waiting for generator"))
+                return False
+            probe = FakeMessage(grad_id=3, username="Probe", content="probe")
+            await js.publish(JOBS_QUEUE, probe.to_job())
+            try:
+                await await_result(
+                    sub, probe.message_id, min(now + PROBE_INTERVAL, deadline)
+                )
+                break
+            except NatsTimeout:
+                print(
+                    f"\r  {paint(Colors.DIM, f'still waiting... {time.monotonic() - started:.0f}s')}",
+                    end="",
+                    flush=True,
+                )
+        while True:
+            try:
+                await sub.next_msg(timeout=1.0)
+            except NatsTimeout:
+                break
+    finally:
+        await sub.unsubscribe()
+    print(
+        f"\r{paint(Colors.GREEN, f'Generator ready after {time.monotonic() - started:.0f}s')}          "
+    )
+    return True
+
+
+async def ensure_streams(js):
+    for queue in (JOBS_QUEUE, RESULTS_QUEUE):
+        try:
+            await js.add_stream(name=queue, subjects=[queue])
+        except BadRequestError:
+            pass
+
+
+def parse_args():
     parser = argparse.ArgumentParser(description="Test generator service locally")
-    parser.add_argument("--nats-url", default=NATS_URL, help="NATS URL")
-    parser.add_argument(
-        "--timeout", type=int, default=10, help="Seconds to wait for generator response"
-    )
-    parser.add_argument(
-        "--save-images", action="store_true", help="Save output .webp images"
-    )
-    parser.add_argument(
-        "--output-dir", default="tests/output", help="Directory for saved images"
-    )
-    parser.add_argument(
-        "--test", type=str, default=None, help="Run a single test by name"
-    )
-    parser.add_argument("--list", action="store_true", help="List available test names")
-    args = parser.parse_args()
+    parser.add_argument("--nats-url", default=NATS_URL)
+    parser.add_argument("--timeout", type=float, default=10)
+    parser.add_argument("--save-images", action="store_true")
+    parser.add_argument("--output-dir", default="tests/output")
+    parser.add_argument("--test", default=None)
+    parser.add_argument("--load", type=int, default=0)
+    parser.add_argument("--startup-timeout", type=float, default=900)
+    parser.add_argument("--flamegraph", action="store_true")
+    parser.add_argument("--list", action="store_true")
+    return parser.parse_args()
+
+
+async def main() -> int:
+    args = parse_args()
+    tests = build_tests()
 
     if args.list:
         print("Available tests:")
-        for name in TESTS:
+        for name in tests:
             print(f"  - {name}")
-        return
+        return 0
 
-    print(f"{Colors.BOLD}Generator Service Test Harness{Colors.RESET}")
+    if args.test and args.test not in tests:
+        print(
+            paint(
+                Colors.RED,
+                f"Unknown test '{args.test}'. Use --list to see available tests.",
+            )
+        )
+        return 1
+
+    print(paint(Colors.BOLD, "Generator Service Test Harness"))
     print(f"NATS: {args.nats_url}")
 
     try:
         nc = await nats.connect(args.nats_url)
         js = nc.jetstream()
-        
-        from nats.js.errors import BadRequestError
-        for queue in [JOBS_QUEUE, RESULTS_QUEUE]:
-            try:
-                await js.add_stream(name=queue, subjects=[queue])
-            except BadRequestError:
-                pass
-                
+        await ensure_streams(js)
     except Exception as e:
-        print(
-            f"{Colors.RED}Cannot connect to NATS at {args.nats_url}: {e}{Colors.RESET}"
-        )
-        sys.exit(1)
+        print(paint(Colors.RED, f"Cannot connect to NATS at {args.nats_url}: {e}"))
+        return 1
 
-    print(f"{Colors.GREEN}NATS connected{Colors.RESET}")
+    print(paint(Colors.GREEN, "NATS connected"))
 
-    if args.test:
-        if args.test not in TESTS:
-            print(
-                f"{Colors.RED}Unknown test '{args.test}'. Use --list to see available tests.{Colors.RESET}"
-            )
-            await nc.close()
-            sys.exit(1)
-        tests_to_run = {args.test: TESTS[args.test]}
-    else:
-        tests_to_run = TESTS
+    try:
+        if args.load > 0:
+            generator_proc = None
+            if args.flamegraph:
+                generator_proc = start_flamegraph()
+            try:
+                if not await wait_until_ready(
+                    nc, js, generator_proc, args.startup_timeout
+                ):
+                    return 1
+                try:
+                    await js.purge_stream(RESULTS_QUEUE)
+                except Exception:
+                    pass
+                ok = await run_load_test(nc, js, args.load, args.timeout)
+            finally:
+                if generator_proc:
+                    await stop_flamegraph(generator_proc)
+            return 0 if ok else 1
 
-    passed = 0
-    failed = 0
-    for name, msg in tests_to_run.items():
-        ok = await run_test(nc, js, name, msg, args.timeout, args.save_images, args.output_dir)
-        if ok:
-            passed += 1
-        else:
-            failed += 1
+        selected = {args.test: tests[args.test]} if args.test else tests
+        output_dir = args.output_dir if args.save_images else None
 
-    print(f"\n{'=' * 60}")
-    total = passed + failed
-    color = Colors.GREEN if failed == 0 else Colors.RED
-    print(f"  {color}{passed}/{total} passed{Colors.RESET}", end="")
-    if failed:
-        print(f"  {Colors.RED}({failed} failed){Colors.RESET}", end="")
-    print()
-    print(f"{'=' * 60}")
+        passed = failed = 0
+        for name, msg in selected.items():
+            if await run_test(nc, js, name, msg, args.timeout, output_dir):
+                passed += 1
+            else:
+                failed += 1
 
-    await nc.close()
-    sys.exit(0 if failed == 0 else 1)
+        color = Colors.GREEN if failed == 0 else Colors.RED
+        suffix = f"  {paint(Colors.RED, f'({failed} failed)')}" if failed else ""
+        print(f"\n{'=' * 60}")
+        print(f"  {paint(color, f'{passed}/{passed + failed} passed')}{suffix}")
+        print("=" * 60)
+        return 0 if failed == 0 else 1
+    finally:
+        await nc.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

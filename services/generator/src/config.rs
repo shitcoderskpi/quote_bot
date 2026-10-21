@@ -16,7 +16,7 @@ impl Config {
         let queue_name = env::var("QUEUE_NAME").unwrap_or("generate:jobs".to_string());
         
         let results_queue = env::var("RESULTS_QUEUE").unwrap_or("generate:results".to_string());
-        let templates_dir = env::var("TEMPLATE").map_err(|_| "TEMPLATE environment variable is not set".to_string())?;
+        let templates_dir = env::var("TEMPLATE").unwrap_or("templates/".to_string());
         
         let md = std::fs::metadata(&templates_dir)
             .map_err(|e| format!("Failed to access TEMPLATE path '{}': {}", templates_dir, e))?;

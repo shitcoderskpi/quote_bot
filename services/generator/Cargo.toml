@@ -1,11 +1,11 @@
 [package]
 name = "generator"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 
 [dependencies]
 image = { version = "0.25.10", features = ["webp"] }
-parley = "0.11.1"
+parley = "0.12.0"
 async-nats = "0.50.0"
 futures-util = "0.3.34"
 tokio = { version = "1.53.1", features = ["full"] }
@@ -15,10 +15,11 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 thiserror = "2.0.20"
 steel-core = "0.8.3"
-taffy = "0.14.0"
+taffy = "0.15.0"
 async-channel = "2.5.0"
 rand = "0.10.2"
 prost = "0.14.4"
+smallvec = "1.16.3"
 
 [profile.dev]
 opt-level = 0
