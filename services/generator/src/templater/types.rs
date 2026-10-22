@@ -287,11 +287,32 @@ pub struct SchemeRichText(pub RichText);
 impl Custom for SchemeRichText {}
 
 #[derive(Clone, Debug, Default)]
-pub struct TextContext {
-    pub content: Rc<String>,
-    pub entities: Rc<Vec<crate::proto::quote::Entity>>,
+pub struct TextEntities(pub Box<[crate::proto::quote::Entity]>);
+impl Custom for TextEntities {}
+
+impl IntoIterator for TextEntities {
+    type Item = crate::proto::quote::Entity;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_vec().into_iter()
+    }
 }
-impl Custom for TextContext {}
+
+impl<'a> IntoIterator for &'a TextEntities {
+    type Item = &'a crate::proto::quote::Entity;
+    type IntoIter = std::slice::Iter<'a, crate::proto::quote::Entity>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl TextEntities {
+    pub fn as_slice(&self) -> &[crate::proto::quote::Entity] {
+        &self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -605,11 +626,10 @@ mod tests {
     #[test]
     fn text_mod_link_color_and_code_family_are_noops() {
         let mut rt = RichText::plain("x");
-        let before_color = rt.default_color.clone();
         let before_family = rt.default_family.clone();
         TextMod::LinkBrush(Paint::solid(Color::WHITE)).apply(&mut rt);
         TextMod::CodeFamily("Fira Code".into()).apply(&mut rt);
-        assert!(matches!(rt.default_color, Paint::Solid(c) if c == Color::BLACK)); // plain defaults to black
+        assert!(matches!(rt.default_color, Paint::Solid(c) if c == Color::BLACK));
         assert_eq!(rt.default_family, before_family);
     }
 

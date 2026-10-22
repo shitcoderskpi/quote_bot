@@ -1,10 +1,13 @@
 use super::types::*;
+use crate::primitives::node::Content::Group;
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
-use crate::primitives::text::{RichText, SpoilerStyle, TextAlign};
+use crate::primitives::text::{RichText, Span, SpoilerStyle, TextAlign};
 use crate::templater::image::SteelImage;
 use crate::templater::types::TextMod::Weight;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use steel::SteelErr;
 use steel::rerrs::ErrorKind;
@@ -15,7 +18,7 @@ use taffy::prelude::*;
 use vello::peniko::{Color, ImageBrush};
 
 pub fn register_all(engine: &mut Engine) {
-    engine.register_value("text-context", TextContext::default().into_steelval().unwrap());
+    engine.register_value("g-entities", TextEntities::default().into_steelval().unwrap());
     engine.register_value("payload", SteelVal::ListV(Default::default()));
     engine.register_fn("px", fn_px);
     engine.register_fn("pt", fn_pt);
@@ -97,6 +100,7 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("string-byte-length", |s: String| s.len());
     engine.register_fn("%make-circle", fn_make_circle);
     engine.register_fn("%make-text", fn_make_text);
+    engine.register_fn("%make-msg", fn_make_msg);
     engine.register_fn("%make-style", fn_make_style);
     engine.register_fn("%make-node", fn_make_node);
     engine.register_fn("%make-shape", fn_make_shape);
@@ -109,7 +113,8 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("%make-image", fn_make_image);
     engine.compile_and_run_raw_program(
             r#"
-            (define (text content . mods) (%make-text content mods text-context))
+            (define (msg content . mods) (%make-msg content mods g-entities))
+            (define (text content . mods) (%make-text content mods))
             (define (get-payload key default-val)
                 (let ((found (hash-try-get payload key)))
                     (if (and found (not (null? found)))
@@ -545,7 +550,7 @@ fn fn_make_style(mods: SteelVal) -> Result<SchemeStyle, SteelErr> {
         let m = StyleMod::from_steelval(item)?;
         m.apply(&mut style);
     }
-    Ok(SchemeStyle(style))
+    Ok(SchemeStyle(Rc::new(RefCell::new(Some(style)))))
 }
 fn fn_make_node(args: SteelVal) -> Result<SchemeNode, SteelErr> {
     let list = steel_list_to_vec(&args)?;
@@ -554,9 +559,9 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, SteelErr> {
 
     for item in &list {
         if let Ok(s) = SchemeStyle::from_steelval(item) {
-            style = s.0;
+            style = s.0.take().unwrap_or_default();
         } else if let Ok(n) = SchemeNode::from_steelval(item) {
-            children.push(n.0);
+            children.push(n.0.take().unwrap_or_default());
         } else if let Ok(t) = SchemeRichText::from_steelval(item) {
             children.push(Node::text(t.0));
         } else if is_void_or_empty(item) {
@@ -569,81 +574,110 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, SteelErr> {
     }
 
     let content = match children.len() {
-        0 => Content::Group(vec![]),
+        0 => Group(vec![]),
         1 => children.into_iter().next().unwrap().content,
-        _ => Content::Group(children),
+        _ => Group(children),
     };
 
-    Ok(SchemeNode(Node { style, content }))
+    Ok(SchemeNode(Rc::new(RefCell::new(Some(Node { style, content })))))
 }
 
-pub(crate) fn fn_make_text(
-    content: SteelVal,
-    mods: SteelVal,
-    ctx: TextContext,
-) -> Result<SchemeRichText, SteelErr> {
-    let text_str = match content {
-        SteelVal::StringV(s) => s.to_string(),
-        other => return Err(SteelErr::new(
-            ErrorKind::TypeMismatch,
-            format!("text: first argument must be a string, got {:?}", other)
-        )),
+fn utf16_range_to_bytes(s: &str, offset: usize, length: usize) -> Option<std::ops::Range<usize>> {
+    let end = offset + length;
+    let (mut pos, mut start, mut stop) = (0usize, None, None);
+    for (b, ch) in s.char_indices() {
+        if pos == offset { start = Some(b); }
+        if pos == end { stop = Some(b); break; }
+        pos += ch.len_utf16();
+    }
+    if start.is_none() && pos == offset { start = Some(s.len()); }
+    if stop.is_none() && pos == end { stop = Some(s.len()); }
+    Some(start?..stop?)
+}
+
+struct StyleOpts {
+    link_brush: Paint,
+    code_family: String,
+    code_brush: Paint,
+}
+
+fn build_rich(text: &str, mods: &SteelVal) -> Result<(RichText, StyleOpts), SteelErr> {
+    let mod_list = steel_list_to_vec(mods)
+        .map_err(|e| SteelErr::new(ErrorKind::TypeMismatch, e.to_string()))?;
+    let mut rich = RichText::plain(text);
+    let mut opts = StyleOpts {
+        link_brush: Paint::solid(Color::BLACK),
+        code_family: "monospace".into(),
+        code_brush: Paint::solid(Color::BLACK),
     };
-
-    let mod_list = steel_list_to_vec(&mods).map_err(|e| SteelErr::new(ErrorKind::TypeMismatch, e.to_string()))?;
-    let mut rich = RichText::plain(&text_str);
-
-    let mut link_brush = Paint::solid(Color::BLACK);
-    let mut code_family = "monospace".to_string();
-    let mut code_brush = Paint::solid(Color::BLACK);
 
     for item in &mod_list {
         let mut m = TextMod::from_steelval(item)?;
-            
-        if let TextMod::LinkBrush(c) =  &m {
-            link_brush = c.clone();
-        } else if let TextMod::CodeFamily(f) = &m {
-            code_family = f.clone();
-        } else if let TextMod::CodeBrush(c) = &m {
-            code_brush = c.clone();
+        match &m {
+            TextMod::LinkBrush(c) => opts.link_brush = c.clone(),
+            TextMod::CodeFamily(f) => opts.code_family = f.clone(),
+            TextMod::CodeBrush(c) => opts.code_brush = c.clone(),
+            _ => {}
         }
-        
         m.apply(&mut rich);
     }
-    
-    if let Some(base_offset) = rich.text.find(&ctx.content) {
-        for ent in ctx.entities {
-            let t = ent.r#type.as_str();
-            let offset = base_offset + ent.offset as usize;
-            let length = ent.length as usize;
-            
-            let mut span = crate::primitives::text::Span::new(offset..(offset + length));
-            match t {
-                "bold" => span.weight = Some(parley::FontWeight::BOLD),
-                "italic" => span.italic = true,
-                "underline" => span.underline = true,
-                "strikethrough" => span.strikethrough = true,
-                "code" | "pre" => {
-                    span.font_family = Some(code_family.clone());
-                    span.paint = Some(code_brush.clone());
-                },
-                "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email" |
-                "phone_number" | "text_mention" => {
-                    span.paint = Some(link_brush.clone());
-                    span.underline = true;
-                },
-                "bot_command" => {
-                    span.paint = Some(link_brush.clone());
-                }
-                "spoiler" => {
-                    span.spoiler = true;
-                }
-                _ => {}
+    Ok((rich, opts))
+}
+
+fn apply_entities(rich: &mut RichText,
+                  entities: TextEntities,
+                  opts: &StyleOpts
+) {
+    let mut span_vec: Vec<Span> = Vec::with_capacity(entities.as_slice().len());
+    for ent in entities.into_iter() {
+        let Some(range) = utf16_range_to_bytes(&rich.text, ent.offset as usize, ent.length as usize)
+        else { continue };
+
+        let mut span = Span::new(range);
+        match ent.r#type.as_str() {
+            "bold" => span.weight = Some(parley::FontWeight::BOLD),
+            "italic" => span.italic = true,
+            "underline" => span.underline = true,
+            "strikethrough" => span.strikethrough = true,
+            "spoiler" => span.spoiler = true,
+            "code" | "pre" => {
+                span.font_family = Some(opts.code_family.clone());
+                span.paint = Some(opts.code_brush.clone());
             }
-            rich.spans.push(span);
+            "text_link" | "url" | "mention" | "hashtag" | "cashtag" | "email"
+            | "phone_number" | "text_mention" => {
+                span.paint = Some(opts.link_brush.clone());
+                span.underline = true;
+            }
+            "bot_command" => span.paint = Some(opts.link_brush.clone()),
+            _ => {}
         }
+        span_vec.push(span);
     }
 
+    rich.spans = span_vec.into_boxed_slice();
+}
+
+pub(crate) fn fn_make_text(content: SteelVal, mods: SteelVal) -> Result<SchemeRichText, SteelErr> {
+    let SteelVal::StringV(s) = content else {
+        return Err(SteelErr::new(
+            ErrorKind::TypeMismatch,
+            format!("text: first argument must be a string, got {:?}", content),
+        ));
+    };
+    let (rich, _) = build_rich(&s, &mods)?;
+    Ok(SchemeRichText(rich))
+}
+
+pub(crate) fn fn_make_msg(content: SteelVal, mods: SteelVal, entities: TextEntities) -> Result<SchemeRichText, SteelErr> {
+    let SteelVal::StringV(s) = content else {
+        return Err(SteelErr::new(
+            ErrorKind::TypeMismatch,
+            format!("text: first argument must be a string, got {:?}", content),
+        ));
+    };
+    let (mut rich, opts) = build_rich(s.as_str(), &mods)?;
+    apply_entities(&mut rich, entities, &opts);
     Ok(SchemeRichText(rich))
 }
 
@@ -661,20 +695,20 @@ fn fn_make_shape(kind: SteelShapeKind, mods: SteelVal) -> Result<SchemeNode, Ste
         }
     }
 
-    Ok(SchemeNode(Node {
+    Ok(SchemeNode(Rc::new(RefCell::new(Some(Node {
         style: Style::default(),
         content: Content::Shape { kind: kind.kind, fill, stroke },
-    }))
+    })))))
 }
 
 fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, SteelErr> {
     let image = SteelImage::from_steelval(data)?;
 
     if image.is_empty() {
-        return Ok(SchemeNode(Node {
+        return Ok(SchemeNode(Rc::new(RefCell::new(Some(Node {
             style: Style::default(),
             content: Content::Group(vec![]),
-        }));
+        })))));
     }
 
     let img = image::load_from_memory(image.as_slice())
@@ -710,7 +744,7 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, SteelErr>
             node.style.layout.size.height = Dimension::length(h);
         }
     }
-    Ok(SchemeNode(node))
+    Ok(SchemeNode(Rc::new(RefCell::new(Some(node)))))
 }
 
 fn fn_make_radial_gradient(args: SteelVal) -> Result<SteelPaint, SteelErr> {
@@ -811,9 +845,9 @@ fn symbol_str(val: &SteelVal, fn_name: &str) -> Result<String, SteelErr> {
     }
 }
 
-fn steel_list_to_vec(val: &SteelVal) -> Result<Vec<SteelVal>, SteelErr> {
+fn steel_list_to_vec(val: &SteelVal) -> Result<Vec<&SteelVal>, SteelErr> {
     match val {
-        SteelVal::ListV(l) => Ok(l.iter().cloned().collect()),
+        SteelVal::ListV(l) => Ok(l.iter().collect()),
         SteelVal::Void => Ok(Vec::new()),
         _ => {
             if is_void_or_empty(val) {
@@ -1473,11 +1507,20 @@ mod tests {
         assert!(fn_text_align(val).is_err());
     }
 
+    fn wrap_node(node: Node) -> SchemeNode {
+        SchemeNode(Rc::new(RefCell::new(Some(node))))
+    }
+
+    fn wrap_style(style: Style) -> SchemeStyle {
+        SchemeStyle(Rc::new(RefCell::new(Some(style))))
+    }
+
     #[test]
     fn make_style_empty() {
         let mods = make_steel_list(vec![]);
         let result = fn_make_style(mods).unwrap();
-        assert_eq!(result.0.opacity, 1.0);
+        let style = result.0.take().unwrap();
+        assert_eq!(style.opacity, 1.0);
     }
 
     #[test]
@@ -1489,41 +1532,46 @@ mod tests {
             rotate_mod.into_steelval().unwrap(),
         ]);
         let result = fn_make_style(mods).unwrap();
-        assert!((result.0.opacity - 0.5).abs() < epsilon());
-        assert_eq!(result.0.rotate_deg, 90.0);
+        let style = result.0.take().unwrap();
+        assert!((style.opacity - 0.5).abs() < epsilon());
+        assert_eq!(style.rotate_deg, 90.0);
     }
 
     #[test]
     fn make_node_empty() {
         let args = make_steel_list(vec![]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Group(ref c) if c.is_empty()));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Group(ref c) if c.is_empty()));
     }
 
     #[test]
     fn make_node_with_style_and_child() {
-        let style = SchemeStyle(Style::default()).into_steelval().unwrap();
-        let child = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let style = wrap_style(Style::default()).into_steelval().unwrap();
+        let child = wrap_node(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
         let args = make_steel_list(vec![style, child]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { .. }));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Shape { .. }));
     }
 
     #[test]
     fn make_node_with_multiple_children() {
-        let c1 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
-        let c2 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let c1 = wrap_node(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let c2 = wrap_node(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
         let args = make_steel_list(vec![c1, c2]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Group(ref c) if c.len() == 2));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Group(ref c) if c.len() == 2));
     }
 
     #[test]
     fn make_node_skips_void() {
-        let c1 = SchemeNode(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
+        let c1 = wrap_node(Node::shape(ShapeKind::Circle, None)).into_steelval().unwrap();
         let args = make_steel_list(vec![SteelVal::Void, c1]);
         let result = fn_make_node(args).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { .. }));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Shape { .. }));
     }
 
     #[test]
@@ -1536,7 +1584,7 @@ mod tests {
     fn make_text_basic() {
         let content = SteelVal::StringV("hello".into());
         let mods = make_steel_list(vec![]);
-        let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
+        let result = fn_make_text(content, mods).unwrap();
         assert_eq!(result.0.text, "hello");
     }
 
@@ -1544,7 +1592,7 @@ mod tests {
     fn make_text_error_not_string() {
         let content = SteelVal::IntV(42);
         let mods = make_steel_list(vec![]);
-        assert!(fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).is_err());
+        assert!(fn_make_text(content, mods).is_err());
     }
 
     #[test]
@@ -1552,7 +1600,7 @@ mod tests {
         let content = SteelVal::StringV("styled".into());
         let bold = Weight(parley::FontWeight::BOLD);
         let mods = make_steel_list(vec![bold.into_steelval().unwrap()]);
-        let result = fn_make_text(content, mods, TextContext { content: "".to_string(), entities: vec![] }).unwrap();
+        let result = fn_make_text(content, mods).unwrap();
         assert_eq!(result.0.default_weight, parley::FontWeight::BOLD);
     }
 
@@ -1565,11 +1613,7 @@ mod tests {
             lc.into_steelval().unwrap(),
             cf.into_steelval().unwrap(),
         ]);
-        let result = fn_make_text(content, mods, 
-                                  TextContext { 
-                                      content: "".to_string(), 
-                                      entities: vec![] })
-            .unwrap();
+        let result = fn_make_text(content, mods).unwrap();
         assert_eq!(result.0.text, "links");
     }
 
@@ -1588,12 +1632,10 @@ mod tests {
             Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
             Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
         ];
-        let result = fn_make_text(
-            content, mods,
-            TextContext {
-                content: text.to_string(),
-                entities,
-            }
+        let result = fn_make_msg(
+            content,
+            mods,
+            TextEntities(entities.into_boxed_slice()),
         ).unwrap();
         assert!(!result.0.spans.is_empty());
     }
@@ -1604,7 +1646,8 @@ mod tests {
         let fill_mod = ShapeMod::Fill(Paint::solid(Color::BLACK));
         let mods = make_steel_list(vec![fill_mod.into_steelval().unwrap()]);
         let result = fn_make_shape(kind, mods).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { ref fill, .. } if fill.is_some()));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_some()));
     }
 
     #[test]
@@ -1616,7 +1659,8 @@ mod tests {
         });
         let mods = make_steel_list(vec![stroke_mod.into_steelval().unwrap()]);
         let result = fn_make_shape(kind, mods).unwrap();
-        assert!(matches!(result.0.content, Content::Shape { ref stroke, .. } if stroke.is_some()));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Shape { ref stroke, .. } if stroke.is_some()));
     }
 
     #[test]
@@ -1625,10 +1669,11 @@ mod tests {
         let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
 
-        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
+        let data = SteelImage::new(buf.into_inner().into_boxed_slice()).into_steelval();
         let args = make_steel_list(vec![]);
         let result = fn_make_image(data, args).unwrap();
-        assert!(matches!(result.0.content, Content::Image { .. }));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Image { .. }));
     }
 
     #[test]
@@ -1638,10 +1683,11 @@ mod tests {
         img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
 
         let clip = SteelShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
-        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
+        let data = SteelImage::new(buf.into_inner().into_boxed_slice()).into_steelval();
         let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
         let result = fn_make_image(data, args).unwrap();
-        assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));
+        let node = result.0.take().unwrap();
+        assert!(matches!(node.content, Content::Image { ref clip, .. } if clip.is_some()));
     }
 
     #[test]
@@ -1654,6 +1700,13 @@ mod tests {
     #[test]
     fn make_image_error_invalid_base64() {
         let data = SteelVal::StringV("not-base64!!!".into());
+        let args = make_steel_list(vec![]);
+        assert!(fn_make_image(data, args).is_err());
+    }
+
+    #[test]
+    fn make_image_error_invalid_bytes() {
+        let data = SteelImage::new(b"not-an-image".to_vec().into_boxed_slice()).into_steelval();
         let args = make_steel_list(vec![]);
         assert!(fn_make_image(data, args).is_err());
     }

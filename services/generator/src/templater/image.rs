@@ -5,11 +5,11 @@ use steel::{SteelErr, SteelVal};
 
 #[derive(Debug, Clone)]
 pub struct SteelImage {
-    data: Box<Vec<u8>>
+    data: Box<[u8]>
 }
 
 impl SteelImage {
-    pub fn new(data: Box<Vec<u8>>) -> Self {
+    pub fn new(data: Box<[u8]>) -> Self {
         Self { data }
     }
 

@@ -1,10 +1,11 @@
+use prost::bytes::Bytes;
 use std::collections::HashMap;
+use prost::bytes::BytesMut;
 use steel::compiler::program::Executable;
 use steel::rerrs::ErrorKind;
 use steel::SteelErr;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use vello::kurbo::Rect;
 use vello::Scene;
 use crate::renderer::SceneTask;
 use crate::templater::Templater;
@@ -18,15 +19,16 @@ mod renderer;
 
 pub mod proto;
 
-async fn process_job<'a>(
+async fn process_job(
     raw: &[u8],
     cfg: &config::Config,
     templater: &mut Templater,
     themes: &HashMap<String, Executable>,
     renderer: &mut primitives::Renderer,
     render_ctx: &mut renderer::RenderContext,
-    buf: &'a mut Vec<u8>,
+    buf: &mut BytesMut,
     pb_buf: &mut Vec<u8>,
+    webp_buf: &mut Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message;
     let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
@@ -61,13 +63,13 @@ async fn process_job<'a>(
     };
     info!("Rendered {}x{}", w, h);
 
-    let mut webp_data = std::io::Cursor::new(Vec::new());
+    let mut webp_data = std::io::Cursor::new(&mut *webp_buf);
     let img_buf = image::RgbaImage::from_raw(w, h, pixels)
         .ok_or("Failed to create RgbaImage from raw pixels")?;
     img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
 
     let result_img = proto::quote::ResultImage {
-        image: webp_data.into_inner(),
+        image: std::mem::take(webp_buf),
         message_id: input_msg.message_id,
         chat_id: input_msg.chat_id,
     };
@@ -77,7 +79,7 @@ async fn process_job<'a>(
 
     buf.resize(compressor::max_compressed_size(pb_buf.len()), 0);
 
-    let n = compressor::compress(pb_buf, 4, buf.as_mut_slice())?;
+    let n = compressor::compress(pb_buf, 4, buf.as_mut())?;
     buf.truncate(n);
 
     Ok(())
@@ -153,10 +155,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut queue = nats_queue::NatsQueue::connect(&cfg.nats_url).await?;
     let mut decmpd: Vec<u8> = Vec::new();
     let mut pb_buf: Vec<u8> = Vec::new();
+    let mut webp_buf: Vec<u8> = Vec::new();
+    let mut cmpd = BytesMut::with_capacity(64 * 1024);
 
     loop {
-        let mut cmpd: Vec<u8> = Vec::new();
-        
+        cmpd.clear();
+        decmpd.clear();
+        webp_buf.clear();
+
         let payload = tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 info!("Received Ctrl+C, shutting down gracefully...");
@@ -173,9 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         };
-
-        decmpd.clear();
-        match compressor::decompress(&payload, &mut decmpd) {
+        match compressor::decompress(payload.as_ref(), &mut decmpd) {
             Ok(r) => r,
             Err(e) => {
                 error!("Failed to decompress job: {}", e);
@@ -183,9 +187,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        match process_job(&decmpd, &cfg, &mut templater, &themes, &mut renderer, &mut render_ctx, &mut cmpd, &mut pb_buf).await {
+        match process_job(&decmpd,
+                          &cfg,
+                          &mut templater,
+                          &themes,
+                          &mut renderer,
+                          &mut render_ctx,
+                          &mut cmpd,
+                          &mut pb_buf,
+                          &mut webp_buf,
+        ).await {
             Ok(()) => {
-                if let Err(e) = queue.enqueue(&cfg.results_queue, cmpd).await {
+                let out: Bytes = cmpd.split().freeze();
+                if let Err(e) = queue.enqueue(&cfg.results_queue, out).await {
                     error!("Failed to enqueue result: {}", e);
                 } else {
                     info!("Pushed result for message");

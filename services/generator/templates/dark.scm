@@ -20,7 +20,8 @@
 (define avatar-color-top (get-payload 'avatar_color_top "#ddd"))
 (define avatar-color-bottom (get-payload 'avatar_color_bottom "#fff"))
 (define name-color (get-payload 'name_color "#fff"))
-(define has-image? (not (equal? (get-payload 'image "") "")))
+(define avatar-image (get-payload 'image #f))
+(define (has-image?) (if avatar-image #t #f))
 
 (define theme-bg-color (hex "#2A2F33"))
 (define theme-link-color (hex "#4B8FCA"))
@@ -30,20 +31,19 @@
 (node (style (flex-row) (align-items 'end)
              (padding (px 2) (px 4) (px 4) (px 1)))
 
-  (node (style (direction 'row) (align-items 'center) (justify-content 'center)
-               (width (px 36)) (height (px 36))
-               (margin-right (px 10)))
-    (if has-image?
-        (node (style (hidden)))
-        (node (style (absolute)
-                     (inset (px 0) (px 0) (px 0) (px 0)))
+  (node (style (relative) (direction 'row) (align-items 'center) (justify-content 'center)
+          (width (px 36)) (height (px 36))
+          (margin-right (px 10)))
+    (if (has-image?)
+      (image avatar-image (circle (px 36)))
+      (node (style (relative) (width (px 36)) (height (px 36))
+              (direction 'row) (align-items 'center) (justify-content 'center))
+        (node (style (absolute) (inset (px 0) (px 0) (px 0) (px 0)))
           (shape (circle)
-             (fill (linear-gradient (hex avatar-color-top)
-                                    (hex avatar-color-bottom))))))
-    (if has-image?
-        (image (get-payload 'image "") (circle (px 36)))
+            (fill (linear-gradient (hex avatar-color-top)
+                    (hex avatar-color-bottom)))))
         (text avatar-initials
-              (size (pt 14)) (color (hex "#ffffff")) (family "sans-serif") (bold))))
+          (size (pt 14)) (color (hex "#ffffff")) (family "sans-serif") (bold)))))
 
   (node (style (direction 'column) (relative)
                (padding (px 10) (px 14) (px 14) (px 10))
@@ -66,17 +66,17 @@
             (color (hex name-color))
             (family "sans-serif") (bold) (wrap #f))
       (if (not (equal? raw-status ""))
-          (node (style (direction 'row) (align-items 'center) (justify-content 'center)
-                       (padding-xy (px 6) (px 0)) (margin-right (px -6)))
-            (node (style (absolute)
-                         (inset (px 0) (px 0) (px 0) (px 0)))
-              (shape (rounded-rect (px 100))
-                     (fill (solid status-bg))))
-            (text raw-status
-                  (size (pt 13)) (color status-color) (family "sans-serif") (wrap #f)))
-          (node (style (hidden)))))
+        (node (style (relative) (direction 'row) (align-items 'center) (justify-content 'center)
+                (padding-xy (px 6) (px 0)) (margin-right (px -6)))
+          (node (style (absolute)
+                  (inset (px 0) (px 0) (px 0) (px 0)))
+            (shape (rounded-rect (px 100))
+              (fill (solid status-bg))))
+          (text raw-status
+            (size (pt 13)) (color status-color) (family "sans-serif") (wrap #f)))
+        (node (style (hidden)))))
 
-    (text content
+    (msg content
       (size (pt 15))
       (overflow-wrap 'anywhere)
       (color (hex "#D8DFE5"))

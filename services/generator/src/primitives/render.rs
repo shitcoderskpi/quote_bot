@@ -10,6 +10,7 @@ use rand::{RngExt, SeedableRng};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use smallvec::SmallVec;
 use taffy::{AvailableSpace, NodeId, Size, TaffyError, TaffyTree};
 use vello::Glyph;
 use vello::Scene;
@@ -18,7 +19,7 @@ use vello::peniko::{BlendMode, Brush, Fill, ImageBrush};
 
 pub struct Renderer {
     font_cx: FontContext,
-    layout_cx: LayoutContext<Brush>,
+    layout_cx: LayoutContext<Paint>,
     taffy: TaffyTree<usize>,
 }
 
@@ -71,7 +72,7 @@ impl Renderer {
     }
 
     fn measure(font_cx: &mut FontContext,
-               layout_cx: &mut LayoutContext<Brush>,
+               layout_cx: &mut LayoutContext<Paint>,
                ctx: Option<&mut usize>,
                known_dims: Size<Option<f32>>,
                avail_space: Size<AvailableSpace>) -> Size<f32> {
@@ -193,7 +194,7 @@ impl Renderer {
                 }
                 Content::Text(rich) => {
                     let text_layout = rich.layout(&mut self.font_cx, &mut self.layout_cx, Some(w));
-                    draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style);
+                    draw_text_layout(scene, transform, &text_layout, &rich.spans, rich.spoiler_style, &rich.default_color);
                 }
                 Content::Image { image, clip } => {
                     let clip_shape = clip.as_ref()
@@ -241,7 +242,7 @@ fn draw_text_layout(scene: &mut Scene,
                     spoiler_style: SpoilerStyle,
                     default_color: &Paint,
 ) {
-    let mut pending: Vec<GlyphRun<Paint>> = Vec::new();
+    let mut pending = SmallVec::<[GlyphRun<Paint>; 8]>::new();
     for line in layout.lines() {
         pending.clear();
         let mut pending_run_idx: Option<usize> = None;
@@ -269,7 +270,7 @@ fn draw_text_layout(scene: &mut Scene,
 
 fn flush(scene: &mut Scene,
          transform: Affine,
-         pending: &mut Vec<GlyphRun<Paint>>,
+         pending: &mut SmallVec<[GlyphRun<Paint>; 8]>,
          spans: &[Span],
          spoiler_style: SpoilerStyle,
          default_color: &Paint) {
@@ -333,7 +334,7 @@ fn draw_text(scene: &mut Scene,
     let style = glyph_run.style();
     let run_width = glyph_run.advance();
     let start_x = glyph_run.offset() as f64;
-    let run_height = (run.metrics().ascent + run.metrics().descent) as f64;
+    let run_height = (run.font_metrics().ascent + run.font_metrics().descent) as f64;
     let brush = style.brush.to_brush(run_width as f64, run_height);
 
 
@@ -516,6 +517,7 @@ mod tests {
     use crate::primitives::text::RichText;
     use std::sync::Arc;
     use taffy::{Dimension, FlexDirection, LengthPercentage, Rect};
+    use vello::peniko::Color;
 
     fn vp() -> Viewport {
         Viewport { width: 1.0, height: 1.0 }

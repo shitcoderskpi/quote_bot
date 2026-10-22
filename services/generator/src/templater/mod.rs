@@ -13,7 +13,7 @@ use steel::rvals::IntoSteelVal;
 use steel::rvals::{FromSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 pub use types::SchemeNode;
-use types::TextContext;
+use types::TextEntities;
 
 pub struct Symbols {
     username: SteelVal,
@@ -73,13 +73,13 @@ impl Templater {
     }
 
     pub fn update_payload(&mut self, msg: &mut SerializableMessage) -> Result<(), SteelErr> {
+        self.payload_map.clear();
         let initials = msg.username.split_whitespace()
             .take(2)
             .filter_map(|s| s.chars().next())
             .collect::<String>()
             .to_uppercase();
         self.payload_map.insert(self.symbols.avatar_initials.clone(), SteelVal::StringV(initials.into()));
-        
         self.payload_map.insert(self.symbols.username.clone(), SteelVal::StringV(std::mem::take(&mut msg.username).into()));
 
         if let Some(status) = msg.user_status.take() {
@@ -89,24 +89,29 @@ impl Templater {
             self.payload_map.insert(self.symbols.user_role.clone(), SteelVal::StringV(role.into()));
         }
 
-        let content_rc = std::rc::Rc::new(std::mem::take(&mut msg.content));
+        let entities = TextEntities(std::mem::take(&mut msg.entities).into_boxed_slice());
 
-        let ctx = TextContext {
-            content: content_rc.clone(),
-            entities: std::rc::Rc::new(std::mem::take(&mut msg.entities))
-        };
-        self.payload_map.insert(self.symbols.content.clone(), SteelVal::StringV((*content_rc).clone().into()));
+        self.payload_map.insert(self.symbols.content.clone(),
+                                SteelVal::StringV(std::mem::take(&mut msg.content).into())
+        );
 
-        self.payload_map.insert(self.symbols.image.clone(), SteelImage::new(Box::from(std::mem::take(&mut msg.image))).into_steelval());
+        let image = std::mem::take(&mut msg.image);
+        if !image.is_empty() {
+            self.payload_map.insert(
+                self.symbols.image.clone(),
+                SteelImage::new(image.into_boxed_slice()).into_steelval(),
+            );
+        }
 
         let (top, bottom) = Self::grad_colors(msg.grad_id as u64);
         self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(top.into()));
         self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
+        self.payload_map.insert(self.symbols.name_color.clone(), SteelVal::StringV(Self::peer_color(msg.grad_id as u64).into()));
 
         let payload_val = SteelVal::HashMapV(Gc::new(self.payload_map.clone()).into());
 
         self.engine.update_value("payload", payload_val);
-        self.engine.update_value("text-context", ctx.into_steelval()?);
+        self.engine.update_value("g-entities", entities.into_steelval()?);
         Ok(())
     }
 
@@ -294,7 +299,7 @@ mod tests {
         let mut t = Templater::new();
         let _payload = r#"{"content": "Hello bold world"}"#;
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "Hello bold world".to_string(),
                 entities: vec![Entity { r#type: "bold".to_string(), offset: 6, length: 4 }],
@@ -316,7 +321,7 @@ mod tests {
     fn render_with_entities_italic() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "hi there".to_string(),
                 entities: vec![Entity { r#type: "italic".to_string(), offset: 0, length: 2 }],
@@ -335,7 +340,7 @@ mod tests {
     fn render_with_entities_link() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "click here".to_string(),
                 entities: vec![Entity { r#type: "text_link".to_string(), offset: 6, length: 4 }],
@@ -482,7 +487,7 @@ mod tests {
     fn render_with_entities_underline() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "underline".to_string(), offset: 0, length: 5 }],
@@ -501,7 +506,7 @@ mod tests {
     fn render_with_entities_strikethrough() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 }],
@@ -520,7 +525,7 @@ mod tests {
     fn render_with_entities_code() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "code".to_string(), offset: 0, length: 5 }],
@@ -539,7 +544,7 @@ mod tests {
     fn render_with_entities_bot_command() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "/start".to_string(),
                 entities: vec![Entity { r#type: "bot_command".to_string(), offset: 0, length: 6 }],
@@ -559,7 +564,7 @@ mod tests {
     fn render_with_entities_url() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "http://a.com".to_string(),
                 entities: vec![Entity { r#type: "url".to_string(), offset: 0, length: 12 }],
@@ -579,7 +584,7 @@ mod tests {
     fn render_with_entities_mention() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "")))"#,
+            r#"(node (msg (get-payload 'content "")))"#,
             &mut SerializableMessage {
                 content: "@user".to_string(),
                 entities: vec![Entity { r#type: "mention".to_string(), offset: 0, length: 5 }],

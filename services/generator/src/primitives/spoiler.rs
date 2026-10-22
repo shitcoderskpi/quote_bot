@@ -1,8 +1,7 @@
-use std::ops::Range;
-use parley::{GlyphRun, Run};
-use smallvec::SmallVec;
-use vello::peniko::Brush;
 use crate::primitives::text::Span;
+use parley::Run;
+use smallvec::SmallVec;
+use std::ops::Range;
 
 pub struct SpoilerSegment {
     pub start: f64,
@@ -20,8 +19,8 @@ pub(crate) fn spoiler_segments<'a>(
     run: &Run<crate::primitives::paint::Paint>,
     spans: impl Iterator<Item = &'a Span>,
     run_start_x: f64,
-) -> SmallVec<[SpoilerSegment; 6]> {
-    let mut segments = SmallVec::<[SpoilerSegment; 6]>::new();
+) -> SmallVec<[SpoilerSegment; 2]> {
+    let mut segments = SmallVec::<[SpoilerSegment; 2]>::new();
 
     for span in spans {
         let mut cx = run_start_x;

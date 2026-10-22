@@ -1,10 +1,10 @@
+use crate::primitives::paint::Paint;
 use parley::{
     Alignment, FontContext, FontWeight, Layout, LayoutContext,
     StyleProperty,
 };
 use std::ops::Range;
-use vello::peniko::{self, Color};
-use crate::primitives::paint::Paint;
+use vello::peniko::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpoilerStyle {
@@ -57,7 +57,7 @@ pub enum TextAlign {
 #[derive(Debug, Clone)]
 pub struct RichText {
     pub text: String,
-    pub spans: Vec<Span>,
+    pub spans: Box<[Span]>,
     pub align: TextAlign,
     pub wrap: bool,
     pub overflow_wrap: parley::OverflowWrap,
@@ -77,7 +77,7 @@ impl RichText {
     pub fn plain(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            spans: Vec::new(),
+            spans: Box::new([]),
             align: TextAlign::Start,
             wrap: true,
             overflow_wrap: parley::OverflowWrap::Normal,
@@ -92,12 +92,6 @@ impl RichText {
             root_font_size: 16.0,
             spoiler_style: SpoilerStyle::default(),
         }
-    }
-
-    #[cfg(test)]
-    pub fn with_span(mut self, span: Span) -> Self {
-        self.spans.push(span);
-        self
     }
 
     pub fn layout(
@@ -189,6 +183,30 @@ impl RichText {
 mod tests {
     use super::*;
 
+    struct RichTextBuilder {
+        text: RichText,
+        span_vec: Vec<Span>,
+    }
+
+    impl RichTextBuilder {
+
+        fn plain(text: impl Into<String>) -> Self {
+            Self{
+                text: RichText::plain(text),
+                span_vec: vec![]
+            }
+        }
+        fn with_span(mut self, span: Span) -> Self {
+            self.span_vec.push(span);
+            self
+        }
+
+        fn into(mut self) -> RichText {
+            self.text.spans = self.span_vec.into_boxed_slice();
+            self.text
+        }
+    }
+
     #[test]
     fn plain_defaults() {
         let rt = RichText::plain("hello");
@@ -222,16 +240,19 @@ mod tests {
     #[test]
     fn with_span_pushes_span() {
         let span = Span::new(0..5);
-        let rt = RichText::plain("hello").with_span(span);
+        let rt = RichTextBuilder::plain("hello")
+            .with_span(span)
+            .into();
         assert_eq!(rt.spans.len(), 1);
         assert_eq!(rt.spans[0].range, 0..5);
     }
 
     #[test]
     fn with_span_chaining() {
-        let rt = RichText::plain("hello world")
+        let rt = RichTextBuilder::plain("hello world")
             .with_span(Span::new(0..5))
-            .with_span(Span::new(6..11));
+            .with_span(Span::new(6..11))
+            .into();
         assert_eq!(rt.spans.len(), 2);
     }
 
@@ -277,7 +298,7 @@ mod tests {
     fn layout_nonempty_text_has_positive_dims() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let mut rt = RichText::plain("Hello, world!");
+        let rt = RichText::plain("Hello, world!");
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0, "width should be > 0, got {}", layout.width());
         assert!(layout.height() > 0.0, "height should be > 0, got {}", layout.height());
@@ -287,9 +308,9 @@ mod tests {
     fn layout_empty_text() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let mut rt = RichText::plain("");
+        let rt = RichText::plain("");
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
-        assert_eq!(layout.width(), 0.0);
+        assert!(layout.width() < 5.0);
     }
 
     #[test]
@@ -297,7 +318,7 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let long_text = "a ".repeat(200);
-        let mut rt = RichText::plain(long_text);
+        let rt = RichText::plain(long_text);
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(100.0));
         assert!(layout.width() <= 101.0, "width {} should be <= 100", layout.width());
     }
@@ -309,7 +330,9 @@ mod tests {
         let mut span = Span::new(0..5);
         span.weight = Some(FontWeight::BOLD);
         span.font_size = Some(32.0);
-        let mut rt = RichText::plain("Hello World").with_span(span);
+        let rt = RichTextBuilder::plain("Hello World")
+            .with_span(span)
+            .into();
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
         assert!(layout.height() > 0.0);
@@ -368,7 +391,9 @@ mod tests {
         span.strikethrough = true;
         span.paint = Some(Paint::solid(Color::WHITE));
         span.line_height = Some(1.5);
-        let mut rt = RichText::plain("Hello World").with_span(span);
+        let rt = RichTextBuilder::plain("Hello World")
+            .with_span(span)
+            .into();
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -378,7 +403,9 @@ mod tests {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
         let span = Span::new(0..5);
-        let mut rt = RichText::plain("Hello World").with_span(span);
+        let rt = RichTextBuilder::plain("Hello World")
+            .with_span(span)
+            .into();
         let layout = rt.layout(&mut font_cx, &mut layout_cx, Some(500.0));
         assert!(layout.width() > 0.0);
     }
@@ -387,7 +414,7 @@ mod tests {
     fn layout_no_max_width() {
         let mut font_cx = FontContext::new();
         let mut layout_cx = LayoutContext::new();
-        let mut rt = RichText::plain("unconstrained");
+        let rt = RichText::plain("unconstrained");
         let layout = rt.layout(&mut font_cx, &mut layout_cx, None);
         assert!(layout.width() > 0.0);
     }

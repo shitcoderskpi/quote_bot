@@ -31,6 +31,12 @@ pub enum Content {
     Group(Vec<Node>),
 }
 
+impl Default for Content {
+    fn default() -> Self {
+        Self::Group(vec![])
+    }
+}
+
 impl std::fmt::Debug for Content {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -52,7 +58,7 @@ impl std::fmt::Debug for Content {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Node {
     pub style: Style,
     pub content: Content,
