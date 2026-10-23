@@ -13,6 +13,7 @@ pub enum SpoilerStyle {
     TgMasked,
     TgOverlay,
     Faded,
+    Redacted,
 }
 
 #[derive(Debug, Clone)]

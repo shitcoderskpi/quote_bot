@@ -100,7 +100,6 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("string-byte-length", |s: String| s.len());
     engine.register_fn("%make-circle", fn_make_circle);
     engine.register_fn("%make-text", fn_make_text);
-    engine.register_fn("%make-msg", fn_make_msg);
     engine.register_fn("%make-style", fn_make_style);
     engine.register_fn("%make-node", fn_make_node);
     engine.register_fn("%make-shape", fn_make_shape);
@@ -113,8 +112,8 @@ pub fn register_all(engine: &mut Engine) {
     engine.register_fn("%make-image", fn_make_image);
     engine.compile_and_run_raw_program(
             r#"
-            (define (msg content . mods) (%make-msg content mods g-entities))
-            (define (text content . mods) (%make-text content mods))
+            (define (text content #:entities [entities #f] . mods)
+                (%make-text content mods entities))
             (define (get-payload key default-val)
                 (let ((found (hash-try-get payload key)))
                     (if (and found (not (null? found)))
@@ -535,10 +534,11 @@ fn fn_spoiler(val: SteelVal) -> Result<TextMod, SteelErr> {
         "none" => Ok(TextMod::SpoilerStyle(SpoilerStyle::None)),
         "tg-masked" => Ok(TextMod::SpoilerStyle(SpoilerStyle::TgMasked)),
         "tg-overlay" => Ok(TextMod::SpoilerStyle(SpoilerStyle::TgOverlay)),
+        "redacted" => Ok(TextMod::SpoilerStyle(SpoilerStyle::Redacted)),
         "faded" => Ok(TextMod::SpoilerStyle(SpoilerStyle::Faded)),
         _ => Err(SteelErr::new(
             ErrorKind::BadSyntax,
-            format!("spoiler: unknown style '{}', expected: tg-masked, tg-overlay, transparent", s)
+            format!("spoiler: unknown style '{}', expected: tg-masked, tg-overlay, redacted transparent", s)
         )),
     }
 }
@@ -658,26 +658,19 @@ fn apply_entities(rich: &mut RichText,
     rich.spans = span_vec.into_boxed_slice();
 }
 
-pub(crate) fn fn_make_text(content: SteelVal, mods: SteelVal) -> Result<SchemeRichText, SteelErr> {
+fn fn_make_text(content: SteelVal, mods: SteelVal, entities: Option<TextEntities>) -> Result<SchemeRichText, SteelErr> {
     let SteelVal::StringV(s) = content else {
         return Err(SteelErr::new(
             ErrorKind::TypeMismatch,
             format!("text: first argument must be a string, got {:?}", content),
         ));
     };
-    let (rich, _) = build_rich(&s, &mods)?;
-    Ok(SchemeRichText(rich))
-}
+    let (mut rich, opts) = build_rich(&s, &mods)?;
 
-pub(crate) fn fn_make_msg(content: SteelVal, mods: SteelVal, entities: TextEntities) -> Result<SchemeRichText, SteelErr> {
-    let SteelVal::StringV(s) = content else {
-        return Err(SteelErr::new(
-            ErrorKind::TypeMismatch,
-            format!("text: first argument must be a string, got {:?}", content),
-        ));
-    };
-    let (mut rich, opts) = build_rich(s.as_str(), &mods)?;
-    apply_entities(&mut rich, entities, &opts);
+    if let Some(entities) = entities {
+        apply_entities(&mut rich, entities, &opts)
+    }
+
     Ok(SchemeRichText(rich))
 }
 
@@ -1584,7 +1577,7 @@ mod tests {
     fn make_text_basic() {
         let content = SteelVal::StringV("hello".into());
         let mods = make_steel_list(vec![]);
-        let result = fn_make_text(content, mods).unwrap();
+        let result = fn_make_text(content, mods, None).unwrap();
         assert_eq!(result.0.text, "hello");
     }
 
@@ -1592,7 +1585,7 @@ mod tests {
     fn make_text_error_not_string() {
         let content = SteelVal::IntV(42);
         let mods = make_steel_list(vec![]);
-        assert!(fn_make_text(content, mods).is_err());
+        assert!(fn_make_text(content, mods, None).is_err());
     }
 
     #[test]
@@ -1600,7 +1593,7 @@ mod tests {
         let content = SteelVal::StringV("styled".into());
         let bold = Weight(parley::FontWeight::BOLD);
         let mods = make_steel_list(vec![bold.into_steelval().unwrap()]);
-        let result = fn_make_text(content, mods).unwrap();
+        let result = fn_make_text(content, mods, None).unwrap();
         assert_eq!(result.0.default_weight, parley::FontWeight::BOLD);
     }
 
@@ -1613,7 +1606,7 @@ mod tests {
             lc.into_steelval().unwrap(),
             cf.into_steelval().unwrap(),
         ]);
-        let result = fn_make_text(content, mods).unwrap();
+        let result = fn_make_text(content, mods, None).unwrap();
         assert_eq!(result.0.text, "links");
     }
 
@@ -1632,10 +1625,10 @@ mod tests {
             Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
             Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
         ];
-        let result = fn_make_msg(
+        let result = fn_make_text(
             content,
             mods,
-            TextEntities(entities.into_boxed_slice()),
+            Some(TextEntities(entities.into_boxed_slice())),
         ).unwrap();
         assert!(!result.0.spans.is_empty());
     }

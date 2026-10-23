@@ -299,7 +299,7 @@ mod tests {
         let mut t = Templater::new();
         let _payload = r#"{"content": "Hello bold world"}"#;
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "Hello bold world".to_string(),
                 entities: vec![Entity { r#type: "bold".to_string(), offset: 6, length: 4 }],
@@ -321,7 +321,7 @@ mod tests {
     fn render_with_entities_italic() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "hi there".to_string(),
                 entities: vec![Entity { r#type: "italic".to_string(), offset: 0, length: 2 }],
@@ -340,7 +340,7 @@ mod tests {
     fn render_with_entities_link() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "click here".to_string(),
                 entities: vec![Entity { r#type: "text_link".to_string(), offset: 6, length: 4 }],
@@ -487,7 +487,7 @@ mod tests {
     fn render_with_entities_underline() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "underline".to_string(), offset: 0, length: 5 }],
@@ -506,7 +506,7 @@ mod tests {
     fn render_with_entities_strikethrough() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 }],
@@ -525,7 +525,7 @@ mod tests {
     fn render_with_entities_code() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "hello".to_string(),
                 entities: vec![Entity { r#type: "code".to_string(), offset: 0, length: 5 }],
@@ -544,7 +544,7 @@ mod tests {
     fn render_with_entities_bot_command() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "/start".to_string(),
                 entities: vec![Entity { r#type: "bot_command".to_string(), offset: 0, length: 6 }],
@@ -564,7 +564,7 @@ mod tests {
     fn render_with_entities_url() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "http://a.com".to_string(),
                 entities: vec![Entity { r#type: "url".to_string(), offset: 0, length: 12 }],
@@ -584,7 +584,7 @@ mod tests {
     fn render_with_entities_mention() {
         let mut t = Templater::new();
         let node = t.compile_and_render_template(
-            r#"(node (msg (get-payload 'content "")))"#,
+            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
             &mut SerializableMessage {
                 content: "@user".to_string(),
                 entities: vec![Entity { r#type: "mention".to_string(), offset: 0, length: 5 }],

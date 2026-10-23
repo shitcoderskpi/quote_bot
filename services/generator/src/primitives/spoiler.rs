@@ -2,6 +2,7 @@ use crate::primitives::text::Span;
 use parley::Run;
 use smallvec::SmallVec;
 use std::ops::Range;
+use vello::kurbo::BezPath;
 
 pub struct SpoilerSegment {
     pub start: f64,
