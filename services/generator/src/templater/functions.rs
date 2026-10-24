@@ -1549,13 +1549,26 @@ mod tests {
         assert!(matches!(result.0.content, Content::Shape { ref stroke, .. } if stroke.is_some()));
     }
 
+    fn solid_jpeg(width: u16, height: u16, rgb: [u8; 3]) -> Vec<u8> {
+        let pixels: Vec<u8> = rgb
+            .iter()
+            .copied()
+            .cycle()
+            .take(width as usize * height as usize * 3)
+            .collect();
+
+        let mut out = Vec::new();
+        jpeg_encoder::Encoder::new(&mut out, 100)
+            .encode(&pixels, width, height, jpeg_encoder::ColorType::Rgb)
+            .unwrap();
+        out
+    }
+
     #[test]
     fn make_image_valid() {
-        let mut buf = std::io::Cursor::new(Vec::new());
-        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
-        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        let jpeg = solid_jpeg(1, 1, [255, 0, 0]);
 
-        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
+        let data = SteelImage::new(Box::new(jpeg)).into_steelval();
         let args = make_steel_list(vec![]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { .. }));
@@ -1563,12 +1576,10 @@ mod tests {
 
     #[test]
     fn make_image_with_clip() {
-        let mut buf = std::io::Cursor::new(Vec::new());
-        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
-        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+        let jpeg = solid_jpeg(2, 2, [0, 0, 255]);
 
         let clip = SchemeShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
-        let data = SteelImage::new(Box::new(buf.into_inner())).into_steelval();
+        let data = SteelImage::new(Box::new(jpeg)).into_steelval();
         let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));

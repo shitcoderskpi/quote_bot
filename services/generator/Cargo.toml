@@ -28,6 +28,9 @@ split-debuginfo = "unpacked"
 [profile.dev.build-override]
 opt-level = 3
 
+[dev-dependencies]
+jpeg-encoder = "0.7.1"
+
 [profile.release]
 debug = true
 strip = false
