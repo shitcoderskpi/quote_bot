@@ -2,7 +2,6 @@ use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
 use crate::primitives::text::{RichText, SpoilerStyle, TextAlign};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as Base64Engine};
 use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
@@ -10,6 +9,11 @@ use std::sync::Arc;
 use steel::SteelErr;
 use taffy::prelude::*;
 use vello::peniko::ImageBrush;
+use zune_jpeg::JpegDecoder;
+use zune_jpeg::zune_core::bytestream::ZCursor;
+use zune_jpeg::zune_core::colorspace::ColorSpace;
+use zune_jpeg::zune_core::options::DecoderOptions;
+use crate::templater::image::SteelImage;
 use crate::templater::types::TextMod::Weight;
 use super::types::*;
 
@@ -554,9 +558,9 @@ pub(crate) fn fn_make_text(
     
     if let Some(base_offset) = rich.text.find(&ctx.content) {
         for ent in ctx.entities {
-            let t = ent.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            let offset = base_offset + ent.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let length = ent.get("length").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let t = ent.r#type.as_str();
+            let offset = base_offset + ent.offset as usize;
+            let length = ent.length as usize;
             
             let mut span = crate::primitives::text::Span::new(offset..(offset + length));
             match t {
@@ -612,25 +616,31 @@ fn fn_make_shape(kind: SchemeShapeKind, mods: SteelVal) -> Result<SchemeNode, St
 }
 
 fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
-    let b64_str = match &data {
-        SteelVal::StringV(s) => s.to_string(),
-        other => return Err(format!("image: first argument must be a base64 string, got {:?}", other)),
-    };
+    let image = SteelImage::from_steelval(data)?;
 
-    let bytes = BASE64_STANDARD.decode(&b64_str)
-        .map_err(|e| format!("image: invalid base64: {}", e))?;
+    if image.is_empty() {
+        return Ok(SchemeNode(Node {
+            style: Style::default(),
+            content: Content::Group(vec![]),
+        }));
+    }
 
-    let img = image::load_from_memory(&bytes)
+    // TODO: cache
+    let options: DecoderOptions = DecoderOptions::default()
+        .jpeg_set_out_colorspace(ColorSpace::RGBA);
+
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(image.as_slice()), options);
+    decoder.decode_headers().map_err(|e| format!("decoder headers error: {}", e))?;
+    let info = decoder.info().unwrap();
+    let rgb = decoder.decode()
         .map_err(|e| format!("image: failed to decode image: {}", e))?;
-    let rgba = img.to_rgba8();
-    let (w, h) = (rgba.width(), rgba.height());
 
     let vello_image = vello::peniko::ImageData {
-        data: vello::peniko::Blob::new(Arc::new(rgba.into_raw())),
+        data: vello::peniko::Blob::new(Arc::new(rgb)),
         format: vello::peniko::ImageFormat::Rgba8,
         alpha_type: vello::peniko::ImageAlphaType::Alpha,
-        width: w,
-        height: h,
+        width: info.width as u32,
+        height: info.height as u32,
     };
     let image_brush = Arc::new(ImageBrush::new(vello_image));
 
@@ -759,6 +769,7 @@ fn is_void_or_empty(val: &SteelVal) -> bool {
 mod tests {
     use super::*;
     use steel::rvals::IntoSteelVal;
+    use crate::proto::quote::Entity;
 
     fn epsilon() -> f32 {
         0.0001
@@ -1498,14 +1509,14 @@ mod tests {
         let content = SteelVal::StringV(text.into());
         let mods = make_steel_list(vec![]);
         let entities = vec![
-            serde_json::json!({"type": "bold", "offset": 6, "length": 4}),
-            serde_json::json!({"type": "italic", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "underline", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "strikethrough", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "code", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "text_link", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "bot_command", "offset": 0, "length": 5}),
-            serde_json::json!({"type": "unknown_type", "offset": 0, "length": 5}),
+            Entity { r#type: "bold".to_string(), offset: 6, length: 4 },
+            Entity { r#type: "italic".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "underline".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "code".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "text_link".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "bot_command".to_string(), offset: 0, length: 5 },
+            Entity { r#type: "unknown_type".to_string(), offset: 0, length: 5 },
         ];
         let result = fn_make_text(
             content, mods,
@@ -1538,14 +1549,26 @@ mod tests {
         assert!(matches!(result.0.content, Content::Shape { ref stroke, .. } if stroke.is_some()));
     }
 
+    fn solid_jpeg(width: u16, height: u16, rgb: [u8; 3]) -> Vec<u8> {
+        let pixels: Vec<u8> = rgb
+            .iter()
+            .copied()
+            .cycle()
+            .take(width as usize * height as usize * 3)
+            .collect();
+
+        let mut out = Vec::new();
+        jpeg_encoder::Encoder::new(&mut out, 100)
+            .encode(&pixels, width, height, jpeg_encoder::ColorType::Rgb)
+            .unwrap();
+        out
+    }
+
     #[test]
     fn make_image_valid() {
-        let mut buf = std::io::Cursor::new(Vec::new());
-        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
-        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
-        let b64 = BASE64_STANDARD.encode(buf.into_inner());
+        let jpeg = solid_jpeg(1, 1, [255, 0, 0]);
 
-        let data = SteelVal::StringV(b64.into());
+        let data = SteelImage::new(Box::new(jpeg)).into_steelval();
         let args = make_steel_list(vec![]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { .. }));
@@ -1553,13 +1576,10 @@ mod tests {
 
     #[test]
     fn make_image_with_clip() {
-        let mut buf = std::io::Cursor::new(Vec::new());
-        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
-        img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
-        let b64 = BASE64_STANDARD.encode(buf.into_inner());
+        let jpeg = solid_jpeg(2, 2, [0, 0, 255]);
 
         let clip = SchemeShapeKind::with_size(ShapeKind::Circle, 50.0, 50.0);
-        let data = SteelVal::StringV(b64.into());
+        let data = SteelImage::new(Box::new(jpeg)).into_steelval();
         let args = make_steel_list(vec![clip.into_steelval().unwrap()]);
         let result = fn_make_image(data, args).unwrap();
         assert!(matches!(result.0.content, Content::Image { ref clip, .. } if clip.is_some()));

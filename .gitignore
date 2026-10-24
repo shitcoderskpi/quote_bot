@@ -18,3 +18,4 @@ cmake-build*/
 .clang*
 target
 tests/output*/
+tests/quote_pb2.py
