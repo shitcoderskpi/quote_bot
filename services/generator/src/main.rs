@@ -66,13 +66,11 @@ async fn process_job<'a>(
     };
     info!("Rendered {}x{}", w, h);
 
-    let start_ms = std::time::Instant::now();
     let webp_data = Encoder::new_rgba(pixels.as_slice(), w, h)
         .preset(Preset::Text)
         .lossless(true)
         .method(0)
         .encode(Unstoppable)?;
-    info!("Encoding took {}ms", start_ms.elapsed().as_millis());
 
     let result_img = proto::quote::ResultImage {
         image: webp_data,
