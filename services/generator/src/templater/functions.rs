@@ -9,6 +9,10 @@ use std::sync::Arc;
 use steel::SteelErr;
 use taffy::prelude::*;
 use vello::peniko::ImageBrush;
+use zune_jpeg::JpegDecoder;
+use zune_jpeg::zune_core::bytestream::ZCursor;
+use zune_jpeg::zune_core::colorspace::ColorSpace;
+use zune_jpeg::zune_core::options::DecoderOptions;
 use crate::templater::image::SteelImage;
 use crate::templater::types::TextMod::Weight;
 use super::types::*;
@@ -621,17 +625,22 @@ fn fn_make_image(data: SteelVal, args: SteelVal) -> Result<SchemeNode, String> {
         }));
     }
 
-    let img = image::load_from_memory(image.as_slice())
+    // TODO: cache
+    let options: DecoderOptions = DecoderOptions::default()
+        .jpeg_set_out_colorspace(ColorSpace::RGBA);
+
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(image.as_slice()), options);
+    decoder.decode_headers().map_err(|e| format!("decoder headers error: {}", e))?;
+    let info = decoder.info().unwrap();
+    let rgb = decoder.decode()
         .map_err(|e| format!("image: failed to decode image: {}", e))?;
-    let rgba = img.to_rgba8();
-    let (w, h) = (rgba.width(), rgba.height());
 
     let vello_image = vello::peniko::ImageData {
-        data: vello::peniko::Blob::new(Arc::new(rgba.into_raw())),
+        data: vello::peniko::Blob::new(Arc::new(rgb)),
         format: vello::peniko::ImageFormat::Rgba8,
         alpha_type: vello::peniko::ImageAlphaType::Alpha,
-        width: w,
-        height: h,
+        width: info.width as u32,
+        height: info.height as u32,
     };
     let image_brush = Arc::new(ImageBrush::new(vello_image));
 

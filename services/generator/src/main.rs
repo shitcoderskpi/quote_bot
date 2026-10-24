@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use steel::compiler::program::Executable;
+use steel::rerrs::ErrorKind;
+use steel::SteelErr;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use vello::kurbo::Rect;
 use vello::Scene;
+use webpx::{Encoder, Preset, Unstoppable};
 use crate::renderer::SceneTask;
 use crate::templater::Templater;
 
@@ -63,13 +66,16 @@ async fn process_job<'a>(
     };
     info!("Rendered {}x{}", w, h);
 
-    let mut webp_data = std::io::Cursor::new(Vec::new());
-    let img_buf = image::RgbaImage::from_raw(w, h, pixels)
-        .ok_or("Failed to create RgbaImage from raw pixels")?;
-    img_buf.write_to(&mut webp_data, image::ImageFormat::WebP)?;
+    let start_ms = std::time::Instant::now();
+    let webp_data = Encoder::new_rgba(pixels.as_slice(), w, h)
+        .preset(Preset::Text)
+        .lossless(true)
+        .method(0)
+        .encode(Unstoppable)?;
+    info!("Encoding took {}ms", start_ms.elapsed().as_millis());
 
     let result_img = proto::quote::ResultImage {
-        image: webp_data.into_inner(),
+        image: webp_data,
         message_id: input_msg.message_id,
         chat_id: input_msg.chat_id,
     };
@@ -83,7 +89,7 @@ async fn process_job<'a>(
     Ok(())
 }
 
-async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> HashMap<String, Executable> {
+async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater) -> Result<HashMap<String, Executable>, SteelErr> {
     let mut map = HashMap::new();
     let mut tasks = Vec::new();
     
@@ -111,15 +117,21 @@ async fn read_and_compile_templates<'a>(dir: &String, templater: &mut Templater)
     
     for task in tasks {
         if let Ok((name, content)) = task.await {
-            if let Ok(exec) = templater.compile(content) {
-                map.insert(name, exec);
-            } else {
-                error!("Failed to compile template: {}", name);
+            match templater.compile(content){
+                Ok(exec) => {
+                    map.insert(name, exec);
+                },
+                Err(e) => {
+                    return Err(SteelErr::new(
+                        ErrorKind::Parse,
+                        format!("Failed to compile template {}: {}", name, e)
+                    ));
+                }
             }
         }
     }
-    
-    map
+
+    Ok(map)
 }
 
 #[tokio::main]
@@ -141,7 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let themes = read_and_compile_templates(
         &cfg.templates_dir,
         &mut templater
-    ).await;
+    ).await?;
 
     info!("Connecting to NATS at {}", cfg.nats_url);
     let mut queue = nats_queue::NatsQueue::connect(&cfg.nats_url).await?;

@@ -4,7 +4,6 @@ version = "0.2.1"
 edition = "2024"
 
 [dependencies]
-image = { version = "0.25.10", features = ["webp"] }
 parley = "0.11.1"
 async-nats = "0.50.0"
 futures-util = "0.3.34"
@@ -19,7 +18,8 @@ taffy = "0.14.0"
 async-channel = "2.5.0"
 rand = "0.10.2"
 prost = "0.14.4"
-
+webpx = "0.4.0"
+zune-jpeg = "0.5.15"
 [profile.dev]
 opt-level = 0
 panic = "abort"
@@ -29,8 +29,9 @@ split-debuginfo = "unpacked"
 opt-level = 3
 
 [profile.release]
-strip = true
-lto = true
+debug = true
+strip = false
+lto = false
 codegen-units = 16
 
 [build-dependencies]
