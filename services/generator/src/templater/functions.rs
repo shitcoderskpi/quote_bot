@@ -1,5 +1,4 @@
 use super::types::*;
-use crate::primitives::node::Content::Group;
 use crate::primitives::node::{Content, Node, Style};
 use crate::primitives::paint::{Paint, Stop, Stroke};
 use crate::primitives::shape::{Corners, ShapeKind};
@@ -11,14 +10,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 use steel::SteelErr;
 use steel::rerrs::ErrorKind;
-use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
+use steel::rvals::{FromSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 use steel::steel_vm::register_fn::RegisterFn;
 use taffy::prelude::*;
 use vello::peniko::{Color, ImageBrush};
 
 pub fn register_all(engine: &mut Engine) {
-    engine.register_value("g-entities", TextEntities::default().into_steelval().unwrap());
     engine.register_value("payload", SteelVal::ListV(Default::default()));
     engine.register_fn("px", fn_px);
     engine.register_fn("pt", fn_pt);
@@ -114,10 +112,8 @@ pub fn register_all(engine: &mut Engine) {
             r#"
             (define (text content #:entities [entities #f] . mods)
                 (%make-text content mods entities))
-            (define (get-payload key default-val)
-                (let ((found (hash-try-get payload key)))
-                    (if (and found (not (null? found)))
-                        found default-val)))
+            (define (get-payload m key default)
+                (if (hash-contains? m key) (hash-ref m key) default))
             (define (style . mods) (%make-style mods))
             (define (circle . args) (%make-circle args))
             (define (rect . args) (%make-rect args))
@@ -181,6 +177,17 @@ fn fn_rgba(r: isize, g: isize, b: isize, a: isize) -> SteelColor {
 
 fn parse_hex_color(hex: &str) -> Option<Color> {
     let hex = hex.trim_start_matches('#');
+    if !hex.is_ascii() {
+        return None;
+    }
+    let expanded: String;
+    let hex = if hex.len() == 3 || hex.len() == 4 {
+        expanded = hex.chars().flat_map(|c| [c, c]).collect();
+        expanded.as_str()
+    } else {
+        hex
+    };
+
     if hex.len() == 6 || hex.len() == 8 {
         let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
         let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
@@ -574,9 +581,11 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, SteelErr> {
     }
 
     let content = match children.len() {
-        0 => Group(vec![]),
-        1 => children.into_iter().next().unwrap().content,
-        _ => Group(children),
+        0 => Content::Group(vec![]),
+        1 if !matches!(children[0].content, Content::Group(_)) => {
+            children.pop().unwrap().content
+        }
+        _ => Content::Group(children),
     };
 
     Ok(SchemeNode(Rc::new(RefCell::new(Some(Node { style, content })))))
@@ -897,7 +906,7 @@ mod tests {
 
     #[test]
     fn hex_invalid_too_short() {
-        assert!(parse_hex_color("FFF").is_none());
+        assert!(parse_hex_color("FF").is_none());
     }
 
     #[test]
@@ -920,6 +929,14 @@ mod tests {
         let upper = parse_hex_color("AABB00").unwrap();
         let lower = parse_hex_color("aabb00").unwrap();
         assert_eq!(upper, lower);
+    }
+
+    #[test]
+    fn hex_3_char_expands() {
+        assert_eq!(
+            parse_hex_color("#f80").unwrap(),
+            vello::peniko::Color::from_rgba8(0xFF, 0x88, 0x00, 255)
+        );
     }
 
     #[test]

@@ -6,9 +6,10 @@ import (
 )
 
 type Config struct {
-	BotToken string
-	NatsUrl  string
-	LogPath  string
+	BotToken  string
+	BotApiUrl string
+	NatsUrl   string
+	LogPath   string
 }
 
 func envDefault(key, fallback string) string {
@@ -25,8 +26,9 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		BotToken: botToken,
-		NatsUrl:  envDefault("NATS_URL", "nats://localhost:4222"),
-		LogPath:  os.Getenv("LOG_PATH"),
+		BotToken:  botToken,
+		BotApiUrl: envDefault("BOT_API_URL", ""),
+		NatsUrl:   envDefault("NATS_URL", "nats://localhost:4222"),
+		LogPath:   os.Getenv("LOG_PATH"),
 	}
 }

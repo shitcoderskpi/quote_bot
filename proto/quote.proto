@@ -9,19 +9,30 @@ message Entity {
     int32 length = 3;
 }
 
-message SerializableMessage {
-    int32 grad_id = 1;
-    string username = 2;
-    optional string user_status = 3;
-    optional string user_role = 4;
-    string content = 5;
-    repeated Entity entities = 6;
-    bytes image = 7;
-    int64 message_id = 8;
-    int64 chat_id = 9;
-    optional int32 dpi = 10;
-    string theme = 11;
+message Author {
+    uint32 sender_index = 1;
+    int32 color_index = 2;
+    string username = 3;
+    optional string user_status = 4;
+    optional string user_role = 5;
+    optional string emoji_status = 6;
 }
+
+message QuoteMessage {
+    int64 message_id = 1;
+    Author author = 2;
+    string content = 3;
+    repeated Entity entities = 4;
+    bytes image = 5;
+}
+
+message QuoteRequest {
+    int64 chat_id = 1;
+    string theme = 2;
+    optional uint32 dpi = 3;
+    repeated QuoteMessage messages = 4;
+}
+
 
 message ResultImage {
     bytes image = 1;

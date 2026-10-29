@@ -23,6 +23,17 @@ import (
 
 var avatarClient = &http.Client{Timeout: 10 * time.Second}
 
+type senderIndexer map[int64]uint32
+
+func (s senderIndexer) of(userID int64) uint32 {
+	if idx, ok := s[userID]; ok {
+		return idx
+	}
+	idx := uint32(len(s))
+	s[userID] = idx
+	return idx
+}
+
 func startHandler(b *gotgbot.Bot, ctx *ext.Context) error {
 	_, err := ctx.EffectiveMessage.Reply(b, fmt.Sprintf("Hello, <b>%s</b>!", html.EscapeString(ctx.EffectiveUser.FirstName)), &gotgbot.SendMessageOpts{ParseMode: "HTML"})
 	return err
@@ -35,11 +46,12 @@ func optionalString(s string) *string {
 	return new(s)
 }
 
-func optionalInt32(v *int) *int32 {
+func optionalUint32(v *int) *uint32 {
 	if v == nil {
 		return nil
 	}
-	return new(int32(*v))
+	u := uint32(*v)
+	return &u
 }
 
 func userAvatar(b *gotgbot.Bot, userID int64) []byte {
@@ -99,7 +111,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 				} else {
 					parsed, err := strconv.Atoi(argLower)
 					if err == nil {
-						parsed = max(min(parsed, 72), 300)
+						parsed = min(max(parsed, 72), 300)
 						dpi = &parsed
 					} else {
 						_, _ = msg.Reply(b, "DPI must be an integer, or theme must be 'dark'/'light'.", nil)
@@ -134,6 +146,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 			if owner, ok := chatMember.(gotgbot.ChatMemberOwner); ok {
 				customTitle = owner.CustomTitle
 			}
+			// TODO: fetch regular user statuses
 		}
 		if userStatus == "" {
 			userStatus = "member"
@@ -153,21 +166,29 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 
 		convertedEntities := convertEntities(text, entities)
 
-		serializableMsg := &pb.SerializableMessage{
-			GradId:     int32(reply.From.Id % 7),
-			Username:   reply.From.FirstName,
-			UserStatus: optionalString(customTitle),
-			UserRole:   new(userStatus),
-			Content:    text,
-			Entities:   convertedEntities,
-			Image:      avatar,
-			MessageId:  reply.MessageId,
-			ChatId:     reply.Chat.Id,
-			Dpi:        optionalInt32(dpi),
-			Theme:      theme,
+		senders := senderIndexer{}
+		quoteReq := &pb.QuoteRequest{
+			ChatId: reply.Chat.Id,
+			Theme:  theme,
+			Dpi:    optionalUint32(dpi),
+			Messages: []*pb.QuoteMessage{
+				{
+					MessageId: reply.MessageId,
+					Author: &pb.Author{
+						SenderIndex: senders.of(reply.From.Id),
+						ColorIndex:  int32(reply.From.Id % 7),
+						Username:    reply.From.FirstName,
+						UserStatus:  optionalString(customTitle),
+						UserRole:    new(userStatus),
+					},
+					Content:  text,
+					Entities: convertedEntities,
+					Image:    avatar,
+				},
+			},
 		}
 
-		pbData, err := proto.Marshal(serializableMsg)
+		pbData, err := proto.Marshal(quoteReq)
 		if err != nil {
 			log.Printf("Failed to marshal proto: %v", err)
 			return err

@@ -3,14 +3,13 @@ mod functions;
 pub mod image;
 
 use crate::primitives::node::Node;
-use crate::proto::quote::SerializableMessage;
+use crate::proto::quote::{Author, QuoteMessage, QuoteRequest};
 use crate::templater::image::SteelImage;
 use steel::HashMap;
 use steel::SteelErr;
 use steel::compiler::program::Executable;
 use steel::gc::Gc;
-use steel::rvals::IntoSteelVal;
-use steel::rvals::{FromSteelVal, SteelVal};
+use steel::rvals::{FromSteelVal, IntoSteelVal, SteelVal};
 use steel::steel_vm::engine::Engine;
 pub use types::SchemeNode;
 use types::TextEntities;
@@ -20,25 +19,36 @@ pub struct Symbols {
     user_status: SteelVal,
     user_role: SteelVal,
     content: SteelVal,
+    entities: SteelVal,
     image: SteelVal,
     avatar_initials: SteelVal,
     avatar_color_top: SteelVal,
     avatar_color_bottom: SteelVal,
     name_color: SteelVal,
+    group_start: SteelVal,
+    group_end: SteelVal,
+    messages: SteelVal,
+    theme: SteelVal,
 }
 
 impl Symbols {
-    fn default() -> Self {
+    fn new() -> Self {
+        let sym = |n: &str| SteelVal::SymbolV(n.into());
         Self {
-            username: SteelVal::SymbolV("username".into()),
-            user_status: SteelVal::SymbolV("user_status".into()),
-            user_role: SteelVal::SymbolV("user_role".into()),
-            content: SteelVal::SymbolV("content".into()),
-            image: SteelVal::SymbolV("image".into()),
-            avatar_initials: SteelVal::SymbolV("avatar_initials".into()),
-            avatar_color_top: SteelVal::SymbolV("avatar_color_top".into()),
-            avatar_color_bottom: SteelVal::SymbolV("avatar_color_bottom".into()),
-            name_color: SteelVal::SymbolV("name_color".into()),
+            username: sym("username"),
+            user_status: sym("user_status"),
+            user_role: sym("user_role"),
+            content: sym("content"),
+            entities: sym("entities"),
+            image: sym("image"),
+            avatar_initials: sym("avatar_initials"),
+            avatar_color_top: sym("avatar_color_top"),
+            avatar_color_bottom: sym("avatar_color_bottom"),
+            name_color: sym("name_color"),
+            group_start: sym("group_start"),
+            group_end: sym("group_end"),
+            messages: sym("messages"),
+            theme: sym("theme"),
         }
     }
 }
@@ -46,100 +56,124 @@ impl Symbols {
 pub struct Templater {
     engine: Engine,
     symbols: Symbols,
-    payload_map: HashMap<SteelVal, SteelVal>,
 }
 
 impl Templater {
     pub fn new() -> Self {
         let mut engine = Engine::new();
         functions::register_all(&mut engine);
-        Self {
-            engine,
-            symbols: Symbols::default(),
-            payload_map: HashMap::new(),
-        }
+        Self { engine, symbols: Symbols::new() }
     }
 
-    #[cfg(test)]
-    pub fn compile_str(&mut self, template_src: &'static str) -> Result<Executable, SteelErr> {
-        let program = self.engine.emit_raw_program_no_path(template_src)?;
-        let executable = self.engine.raw_program_to_executable(program)?;
-        Ok(executable)
-    }
     pub fn compile(&mut self, template_src: String) -> Result<Executable, SteelErr> {
         let program = self.engine.emit_raw_program_no_path(template_src)?;
         let executable = self.engine.raw_program_to_executable(program)?;
         Ok(executable)
     }
 
-    pub fn update_payload(&mut self, msg: &mut SerializableMessage) -> Result<(), SteelErr> {
-        self.payload_map.clear();
-        let initials = msg.username.split_whitespace()
+    fn message_to_steel(
+        s: &Symbols,
+        msg: QuoteMessage,
+        group_start: bool,
+        group_end: bool,
+    ) -> Result<SteelVal, SteelErr> {
+        let QuoteMessage { author, content, entities, image, .. } = msg;
+        let Author { color_index, username, user_status, user_role, .. } =
+            author.unwrap_or_else(|| Author {
+                username: "Unknown".to_owned(),
+                ..Default::default()
+            });
+
+        let initials: String = username
+            .split_whitespace()
             .take(2)
-            .filter_map(|s| s.chars().next())
-            .collect::<String>()
-            .to_uppercase();
-        self.payload_map.insert(self.symbols.avatar_initials.clone(), SteelVal::StringV(initials.into()));
-        self.payload_map.insert(self.symbols.username.clone(), SteelVal::StringV(std::mem::take(&mut msg.username).into()));
+            .filter_map(|w| w.chars().next())
+            .flat_map(char::to_uppercase)
+            .collect();
+        let (top, bottom) = Self::avatar_colors(color_index);
+        let peer_color = Self::peer_color(color_index);
 
-        if let Some(status) = msg.user_status.take() {
-            self.payload_map.insert(self.symbols.user_status.clone(), SteelVal::StringV(status.into()));
+        let mut m = HashMap::new();
+        m.insert(s.username.clone(), SteelVal::StringV(username.into()));
+        if let Some(v) = user_status {
+            m.insert(s.user_status.clone(), SteelVal::StringV(v.into()));
         }
-        if let Some(role) = msg.user_role.take() {
-            self.payload_map.insert(self.symbols.user_role.clone(), SteelVal::StringV(role.into()));
+        if let Some(v) = user_role {
+            m.insert(s.user_role.clone(), SteelVal::StringV(v.into()));
         }
-
-        let entities = TextEntities(std::mem::take(&mut msg.entities).into_boxed_slice());
-
-        self.payload_map.insert(self.symbols.content.clone(),
-                                SteelVal::StringV(std::mem::take(&mut msg.content).into())
+        m.insert(s.content.clone(), SteelVal::StringV(content.into()));
+        m.insert(
+            s.entities.clone(),
+            TextEntities(entities.into_boxed_slice()).into_steelval()?,
         );
 
-        let image = std::mem::take(&mut msg.image);
         if !image.is_empty() {
-            self.payload_map.insert(
-                self.symbols.image.clone(),
-                SteelImage::new(image.into_boxed_slice()).into_steelval(),
-            );
+            m.insert(s.image.clone(), SteelImage::new(image.into()).into_steelval());
         }
+        m.insert(s.avatar_initials.clone(), SteelVal::StringV(initials.into()));
+        m.insert(s.avatar_color_top.clone(), SteelVal::StringV(top.into()));
+        m.insert(s.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
+        m.insert(s.name_color.clone(), SteelVal::StringV(peer_color.into()));
+        m.insert(s.group_start.clone(), SteelVal::BoolV(group_start));
+        m.insert(s.group_end.clone(), SteelVal::BoolV(group_end));
 
-        let (top, bottom) = Self::grad_colors(msg.grad_id as u64);
-        self.payload_map.insert(self.symbols.avatar_color_top.clone(), SteelVal::StringV(top.into()));
-        self.payload_map.insert(self.symbols.avatar_color_bottom.clone(), SteelVal::StringV(bottom.into()));
-        self.payload_map.insert(self.symbols.name_color.clone(), SteelVal::StringV(Self::peer_color(msg.grad_id as u64).into()));
+        Ok(SteelVal::HashMapV(Gc::new(m).into()))
+    }
 
-        let payload_val = SteelVal::HashMapV(Gc::new(self.payload_map.clone()).into());
+    pub fn update_payload(&mut self, req: QuoteRequest) -> Result<(), SteelErr> {
+        let QuoteRequest { theme, messages, .. } = req;
 
-        self.engine.update_value("payload", payload_val);
-        self.engine.update_value("g-entities", entities.into_steelval()?);
+        // TODO: BAD
+        let keys: Vec<Option<u32>> = messages
+            .iter()
+            .map(|m| m.author.as_ref().map(|a| a.sender_index))
+            .collect();
+        let n = messages.len();
+        let s = &self.symbols;
+
+        let list = messages
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let start = i == 0 || keys[i - 1] != keys[i];
+                let end = i + 1 == n || keys[i + 1] != keys[i];
+                Self::message_to_steel(s, m, start, end)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut payload = HashMap::new();
+        // TODO: also BAD
+        payload.insert(s.messages.clone(), SteelVal::ListV(list.into_iter().collect()));
+        payload.insert(s.theme.clone(), SteelVal::StringV(theme.into()));
+
+        self.engine
+            .update_value("payload", SteelVal::HashMapV(Gc::new(payload).into()));
         Ok(())
     }
 
     pub fn render_template(
         &mut self,
         template: &Executable,
-        msg: &mut SerializableMessage,
+        req: QuoteRequest,
     ) -> Result<Node, Box<dyn std::error::Error>> {
-        self.update_payload(msg)?;
+        self.update_payload(req)?;
         let res = self.engine.run_executable(template)?;
-        let last_val = res.last()
-            .ok_or("Template returned no value")?;
-
+        let last_val = res.last().ok_or("Template returned no value")?;
         extract_node(last_val)
     }
 
     #[cfg(test)]
     fn compile_and_render_template(
         &mut self,
-        template: &'static str,
-        msg: &mut SerializableMessage,
+        template: &str,
+        messages: Vec<QuoteMessage>,
     ) -> Result<Node, Box<dyn std::error::Error>> {
-        let executable = self.compile_str(template)?;
-        self.render_template(&executable, msg)
+        let executable = self.compile(template.to_owned())?;
+        self.render_template(&executable, QuoteRequest { messages, ..Default::default() })
     }
 
-    fn grad_colors(grad_id: u64) -> (&'static str, &'static str) {
-        match grad_id % 7 {
+    fn avatar_colors(color_index: i32) -> (&'static str, &'static str) {
+        match color_index.rem_euclid(7) {
             0 => ("#FF845E", "#D45246"), // Red
             1 => ("#FEBB5B", "#F68136"), // Orange
             2 => ("#B694F9", "#6C61DF"), // Violet
@@ -150,8 +184,8 @@ impl Templater {
         }
     }
 
-    fn peer_color(grad_id: u64) -> &'static str {
-        match grad_id % 7 {
+    fn peer_color(color_index: i32) -> &'static str {
+        match color_index.rem_euclid(7) {
             0 => "#E17076", // Red
             1 => "#EFA65A", // Orange
             2 => "#A695E7", // Purple
@@ -173,198 +207,85 @@ fn extract_node(val: &SteelVal) -> Result<Node, Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use crate::primitives::node::Content;
-    use crate::proto::quote::{Entity, SerializableMessage};
+    use crate::primitives::paint::Paint;
+    use crate::proto::quote::Entity;
+    use taffy::prelude::Dimension;
 
-    fn epsilon() -> f32 {
-        0.1
+    const EPSILON: f32 = 0.0001;
+    const FIRST: &str = "(define m (car (hash-ref payload 'messages)))\n";
+
+    fn entity(kind: &str, offset: i32, length: i32) -> Entity {
+        Entity { r#type: kind.to_owned(), offset, length }
+    }
+
+    fn msg_with_author(author: Author) -> QuoteMessage {
+        QuoteMessage { author: Some(author), ..Default::default() }
+    }
+
+    fn msg_with_user(username: &str) -> QuoteMessage {
+        msg_with_author(Author { username: username.to_owned(), ..Default::default() })
+    }
+
+    fn msg_with_color(color_index: i32) -> QuoteMessage {
+        msg_with_author(Author { color_index, ..Default::default() })
+    }
+
+    fn msg_from_sender(sender_index: u32) -> QuoteMessage {
+        msg_with_author(Author { sender_index, ..Default::default() })
+    }
+
+    fn msg_with_text(content: &str, entities: Vec<Entity>) -> QuoteMessage {
+        QuoteMessage { content: content.to_owned(), entities, ..Default::default() }
+    }
+
+    macro_rules! text_of {
+        ($node:expr) => {
+            match &$node.content {
+                Content::Text(rich) => rich,
+                other => panic!("Expected Text, got {:?}", other),
+            }
+        };
+    }
+
+    fn render_many(template: &str, msgs: Vec<QuoteMessage>) -> Node {
+        Templater::new().compile_and_render_template(template, msgs).unwrap()
+    }
+
+    fn render(template: &str, msg: QuoteMessage) -> Node {
+        render_many(&format!("{FIRST}{template}"), vec![msg])
+    }
+
+    fn payload_text(key: &str, msg: QuoteMessage) -> String {
+        let node = render(&format!(r#"(node (text (get-payload m '{key} "")))"#), msg);
+        text_of!(node).text.clone()
+    }
+
+    fn render_entity(content: &str, kind: &str, offset: i32, length: i32) -> Node {
+        render(
+            r#"(node (text (get-payload m 'content "") #:entities (get-payload m 'entities #f)))"#,
+            msg_with_text(content, vec![entity(kind, offset, length)]),
+        )
     }
 
     #[test]
     fn render_minimal_node() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
+        let node = render(
             "(node (style (width (px 100)) (height (px 50))))",
-            &mut SerializableMessage::default(),
-        ).unwrap();
+            QuoteMessage::default(),
+        );
         assert!(matches!(node.content, Content::Group(ref c) if c.is_empty()));
-        assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
-        assert_eq!(node.style.layout.size.height, taffy::prelude::Dimension::length(50.0));
-    }
-
-    #[test]
-    fn render_shape_node() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            "(node (shape (rect) (fill (solid (hex \"#FF0000\")))))",
-            &mut SerializableMessage::default(),
-        ).unwrap();
-        assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_some()));
-    }
-
-    #[test]
-    fn render_text_from_payload() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'username "Default")))"#,
-            &mut SerializableMessage {
-                username: "Alice".to_string(),
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "Alice"),
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_text_payload_default() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'missing_key "fallback")))"#,
-            &mut SerializableMessage::default(),
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "fallback"),
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_avatar_initials() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'avatar_initials "")))"#,
-            &mut SerializableMessage {
-                username: "John Doe".to_string(),
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "JD"),
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_avatar_initials_single_name() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'avatar_initials "")))"#,
-            &mut SerializableMessage {
-                username: "Alice".to_string(),
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "A"),
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_avatar_initials_three_names() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'avatar_initials "")))"#,
-            &mut SerializableMessage {
-                username: "Foo Bar Baz".to_string(),
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "FB"),
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_avatar_colors_by_grad_id() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'avatar_color_top "")))"#,
-            &mut SerializableMessage {
-                grad_id: 3,
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "#9AD164"),
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_with_entities_bold() {
-        let mut t = Templater::new();
-        let _payload = r#"{"content": "Hello bold world"}"#;
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "Hello bold world".to_string(),
-                entities: vec![Entity { r#type: "bold".to_string(), offset: 6, length: 4 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert_eq!(rich.text, "Hello bold world");
-                assert!(!rich.spans.is_empty(), "Should have entity spans");
-                assert_eq!(rich.spans[0].weight, Some(parley::FontWeight::BOLD));
-                assert_eq!(rich.spans[0].range, 6..10);
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_with_entities_italic() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "hi there".to_string(),
-                entities: vec![Entity { r#type: "italic".to_string(), offset: 0, length: 2 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert_eq!(rich.spans[0].italic, true);
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_with_entities_link() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "click here".to_string(),
-                entities: vec![Entity { r#type: "text_link".to_string(), offset: 6, length: 4 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert_eq!(rich.spans[0].underline, true);
-                assert!(rich.spans[0].paint.is_some());
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
+        assert_eq!(node.style.layout.size.width, Dimension::length(100.0));
+        assert_eq!(node.style.layout.size.height, Dimension::length(50.0));
     }
 
     #[test]
     fn render_nested_nodes() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
+        let node = render(
             r#"(node (style (flex-column))
                  (node (style (width (px 100)) (height (px 30))))
                  (node (style (width (px 100)) (height (px 30)))))"#,
-            &mut SerializableMessage::default(),
-        ).unwrap();
+            QuoteMessage::default(),
+        );
         match &node.content {
             Content::Group(children) => assert_eq!(children.len(), 2),
             other => panic!("Expected Group with 2 children, got {:?}", other),
@@ -373,231 +294,275 @@ mod tests {
 
     #[test]
     fn render_with_style_modifiers() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
+        let node = render(
             r#"(node (style (flex-row) (align-center) (justify-between)
                          (padding (px 10)) (gap (px 5))
                          (opacity 0.8) (rotate 45)))"#,
-            &mut SerializableMessage::default(),
-        ).unwrap();
-        assert!((node.style.opacity - 0.8).abs() < epsilon());
-        assert!((node.style.rotate_deg - 45.0).abs() < epsilon() as f64);
-    }
-
-    #[test]
-    fn render_invalid_script_returns_error() {
-        let mut t = Templater::new();
-        let result = t.compile_and_render_template(
-            "(this is not valid scheme +++",
-            &mut SerializableMessage::default(),
+            QuoteMessage::default(),
         );
-        assert!(result.is_err());
+        assert!((node.style.opacity - 0.8).abs() < EPSILON);
+        assert!((node.style.rotate_deg - 45.0).abs() < EPSILON as f64);
     }
 
     #[test]
     fn render_with_conditional() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
+        let node = render(
             r#"(if #t
                  (node (style (width (px 100)) (height (px 100))))
                  (node (style (width (px 50)) (height (px 50)))))"#,
-            &mut SerializableMessage::default(),
-        ).unwrap();
-        assert_eq!(node.style.layout.size.width, taffy::prelude::Dimension::length(100.0));
-        assert_eq!(node.style.layout.size.height, taffy::prelude::Dimension::length(100.0));
+            QuoteMessage::default(),
+        );
+        assert_eq!(node.style.layout.size.width, Dimension::length(100.0));
+        assert_eq!(node.style.layout.size.height, Dimension::length(100.0));
     }
 
     #[test]
-    fn render_with_gradients() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r##"(node (shape (rect) (fill (linear-gradient (hex "#FF0000") (hex "#0000FF")))))"##,
-            &mut SerializableMessage::default(),
-        ).unwrap();
-        match &node.content {
-            Content::Shape { fill: Some(crate::primitives::paint::Paint::LinearGradient { .. }), .. } => {}
-            other => panic!("Expected Shape with LinearGradient fill, got {:?}", other),
-        }
+    fn render_invalid_script_returns_error() {
+        let result = Templater::new()
+            .compile_and_render_template("(this is not valid scheme +++", vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn render_shape_node() {
+        let node = render(
+            r##"(node (shape (rect) (fill (solid (hex "#FF0000")))))"##,
+            QuoteMessage::default(),
+        );
+        assert!(matches!(node.content, Content::Shape { ref fill, .. } if fill.is_some()));
     }
 
     #[test]
     fn render_rounded_rect() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
+        let node = render(
             r##"(node (shape (rounded-rect (px 10)) (fill (solid (hex "#000000")))))"##,
-            &mut SerializableMessage::default(),
-        ).unwrap();
+            QuoteMessage::default(),
+        );
         assert!(matches!(node.content, Content::Shape { .. }));
     }
 
     #[test]
     fn render_circle_shape() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
+        let node = render(
             r##"(node (shape (circle (px 50)) (fill (solid (hex "#FF0000")))))"##,
-            &mut SerializableMessage::default(),
-        ).unwrap();
+            QuoteMessage::default(),
+        );
         assert!(matches!(node.content, Content::Shape { .. }));
     }
 
     #[test]
-    fn render_avatar_colors_all_grad_ids() {
-        let expected_tops = vec![
-            (0, "#FF845E"),
-            (1, "#FEBB5B"),
-            (2, "#B694F9"),
-            (3, "#9AD164"),
-            (4, "#5BCBE3"),
-            (5, "#5CAFFA"),
-            (6, "#FF8AAC"),
-        ];
-        for (grad_id, expected_top) in expected_tops {
-            let mut t = Templater::new();
-            let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'avatar_color_top "")))"#,
-            &mut SerializableMessage {
-                grad_id,
-                ..Default::default()
-            },
-        ).unwrap();
-            match &node.content {
-                Content::Text(rich) => assert_eq!(rich.text, expected_top, "grad_id={}", grad_id),
-                other => panic!("Expected Text for grad_id={}, got {:?}", grad_id, other),
-            }
+    fn render_with_gradients() {
+        let node = render(
+            r##"(node (shape (rect) (fill (linear-gradient (hex "#FF0000") (hex "#0000FF")))))"##,
+            QuoteMessage::default(),
+        );
+        assert!(matches!(
+            node.content,
+            Content::Shape { fill: Some(Paint::LinearGradient { .. }), .. }
+        ));
+    }
+
+    #[test]
+    fn render_text_from_payload() {
+        assert_eq!(payload_text("username", msg_with_user("Alice")), "Alice");
+    }
+
+    #[test]
+    fn render_text_payload_default() {
+        let node = render(
+            r#"(node (text (get-payload m 'missing_key "fallback")))"#,
+            QuoteMessage::default(),
+        );
+        assert_eq!(text_of!(node).text, "fallback");
+    }
+
+    #[test]
+    fn render_missing_author_uses_unknown() {
+        assert_eq!(payload_text("username", QuoteMessage::default()), "Unknown");
+    }
+
+    #[test]
+    fn render_optional_author_fields() {
+        let msg = msg_with_author(Author {
+            user_status: Some("online".to_owned()),
+            user_role: Some("admin".to_owned()),
+            ..Default::default()
+        });
+        let node = render(
+            r#"(node (text (string-append (get-payload m 'user_status "") "/" (get-payload m 'user_role ""))))"#,
+            msg,
+        );
+        assert_eq!(text_of!(node).text, "online/admin");
+    }
+
+    #[test]
+    fn render_empty_image_is_absent() {
+        let node = render(
+            r#"(node (text (if (get-payload m 'image #f) "has" "none")))"#,
+            QuoteMessage::default(),
+        );
+        assert_eq!(text_of!(node).text, "none");
+    }
+
+    #[test]
+    fn render_avatar_initials() {
+        for (username, expected) in [
+            ("John Doe", "JD"),
+            ("Alice", "A"),
+            ("Foo Bar Baz", "FB"),
+            ("alice smith", "AS"),
+        ] {
+            assert_eq!(
+                payload_text("avatar_initials", msg_with_user(username)),
+                expected,
+                "username={username:?}",
+            );
         }
     }
 
     #[test]
-    fn render_avatar_colors_bottom() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'avatar_color_bottom "")))"#,
-            &mut SerializableMessage {
-                grad_id: 5,
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => assert_eq!(rich.text, "#408ACF"),
-            other => panic!("Expected Text, got {:?}", other),
+    fn render_avatar_colors_all_color_indices() {
+        let expected = [
+            (0, "#FF845E", "#D45246"),
+            (1, "#FEBB5B", "#F68136"),
+            (2, "#B694F9", "#6C61DF"),
+            (3, "#9AD164", "#46BA43"),
+            (4, "#5BCBE3", "#359AD4"),
+            (5, "#5CAFFA", "#408ACF"),
+            (6, "#FF8AAC", "#D95574"),
+            (7, "#FF845E", "#D45246"),
+            (-1, "#FF8AAC", "#D95574"),
+        ];
+        for (idx, top, bottom) in expected {
+            assert_eq!(payload_text("avatar_color_top", msg_with_color(idx)), top, "top, idx={idx}");
+            assert_eq!(payload_text("avatar_color_bottom", msg_with_color(idx)), bottom, "bottom, idx={idx}");
         }
+    }
+
+    #[test]
+    fn render_multiple_messages_in_order() {
+        let node = render_many(
+            r#"(%make-node
+                 (cons (style (flex-column))
+                       (map (lambda (m) (node (text (get-payload m 'content ""))))
+                            (hash-ref payload 'messages))))"#,
+            vec![
+                msg_with_text("one", vec![]),
+                msg_with_text("two", vec![]),
+                msg_with_text("three", vec![]),
+            ],
+        );
+        let Content::Group(children) = &node.content else {
+            panic!("Expected Group, got {:?}", node.content)
+        };
+        let texts: Vec<_> = children.iter().map(|c| text_of!(c).text.clone()).collect();
+        assert_eq!(texts, ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn render_group_flags_by_sender_index() {
+        let node = render_many(
+            r#"(%make-node
+                 (cons (style (flex-column))
+                       (map (lambda (m)
+                              (node (text (string-append
+                                            (if (get-payload m 'group_start #f) "S" "-")
+                                            (if (get-payload m 'group_end #f) "E" "-")))))
+                            (hash-ref payload 'messages))))"#,
+            vec![msg_from_sender(0), msg_from_sender(0), msg_from_sender(1)],
+        );
+        let Content::Group(children) = &node.content else {
+            panic!("Expected Group, got {:?}", node.content)
+        };
+        let flags: Vec<_> = children.iter().map(|c| text_of!(c).text.clone()).collect();
+        assert_eq!(flags, ["S-", "-E", "SE"]);
+    }
+
+    #[test]
+    fn render_group_flags_single_message() {
+        let node = render(
+            r#"(node (text (string-append
+                             (if (get-payload m 'group_start #f) "S" "-")
+                             (if (get-payload m 'group_end #f) "E" "-"))))"#,
+            QuoteMessage::default(),
+        );
+        assert_eq!(text_of!(node).text, "SE");
+    }
+
+    #[test]
+    fn render_entities_stay_with_their_message() {
+        let node = render_many(
+            r#"(%make-node
+                 (cons (style (flex-column))
+                       (map (lambda (m)
+                              (node (text (get-payload m 'content "")
+                                          #:entities (get-payload m 'entities #f))))
+                            (hash-ref payload 'messages))))"#,
+            vec![
+                msg_with_text("plain", vec![]),
+                msg_with_text("bold", vec![entity("bold", 0, 4)]),
+            ],
+        );
+        let Content::Group(children) = &node.content else {
+            panic!("Expected Group, got {:?}", node.content)
+        };
+        assert!(text_of!(children[0]).spans.is_empty());
+        assert_eq!(text_of!(children[1]).spans.len(), 1);
+    }
+
+    #[test]
+    fn render_with_entities_bold() {
+        let node = render_entity("Hello bold world", "bold", 6, 4);
+        let rich = text_of!(node);
+        assert_eq!(rich.text, "Hello bold world");
+        assert_eq!(rich.spans.len(), 1);
+        assert_eq!(rich.spans[0].weight, Some(parley::FontWeight::BOLD));
+        assert_eq!(rich.spans[0].range, 6..10);
+    }
+
+    #[test]
+    fn render_with_entities_italic() {
+        let node = render_entity("hi there", "italic", 0, 2);
+        assert!(text_of!(node).spans[0].italic);
     }
 
     #[test]
     fn render_with_entities_underline() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "hello".to_string(),
-                entities: vec![Entity { r#type: "underline".to_string(), offset: 0, length: 5 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert_eq!(rich.spans[0].underline, true);
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
+        let node = render_entity("hello", "underline", 0, 5);
+        assert!(text_of!(node).spans[0].underline);
     }
 
     #[test]
     fn render_with_entities_strikethrough() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "hello".to_string(),
-                entities: vec![Entity { r#type: "strikethrough".to_string(), offset: 0, length: 5 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert_eq!(rich.spans[0].strikethrough, true);
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
+        let node = render_entity("hello", "strikethrough", 0, 5);
+        assert!(text_of!(node).spans[0].strikethrough);
     }
 
     #[test]
     fn render_with_entities_code() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "hello".to_string(),
-                entities: vec![Entity { r#type: "code".to_string(), offset: 0, length: 5 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert!(rich.spans[0].font_family.is_some());
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
+        let node = render_entity("hello", "code", 0, 5);
+        assert!(text_of!(node).spans[0].font_family.is_some());
     }
 
     #[test]
     fn render_with_entities_bot_command() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "/start".to_string(),
-                entities: vec![Entity { r#type: "bot_command".to_string(), offset: 0, length: 6 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert!(rich.spans[0].paint.is_some());
-                assert!(!rich.spans[0].underline);
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
+        let node = render_entity("/start", "bot_command", 0, 6);
+        let span = &text_of!(node).spans[0];
+        assert!(span.paint.is_some());
+        assert!(!span.underline);
     }
 
     #[test]
-    fn render_with_entities_url() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "http://a.com".to_string(),
-                entities: vec![Entity { r#type: "url".to_string(), offset: 0, length: 12 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert!(rich.spans[0].paint.is_some());
-                assert_eq!(rich.spans[0].underline, true);
-            }
-            other => panic!("Expected Text, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn render_with_entities_mention() {
-        let mut t = Templater::new();
-        let node = t.compile_and_render_template(
-            r#"(node (text (get-payload 'content "") #:entities g-entities))"#,
-            &mut SerializableMessage {
-                content: "@user".to_string(),
-                entities: vec![Entity { r#type: "mention".to_string(), offset: 0, length: 5 }],
-                ..Default::default()
-            },
-        ).unwrap();
-        match &node.content {
-            Content::Text(rich) => {
-                assert!(rich.spans[0].paint.is_some());
-                assert_eq!(rich.spans[0].underline, true);
-            }
-            other => panic!("Expected Text, got {:?}", other),
+    fn render_with_entities_linkish() {
+        for (kind, content, offset, length) in [
+            ("text_link", "click here", 6, 4),
+            ("url", "http://a.com", 0, 12),
+            ("mention", "@user", 0, 5),
+        ] {
+            let node = render_entity(content, kind, offset, length);
+            let span = &text_of!(node).spans[0];
+            assert!(span.paint.is_some(), "{kind}: paint");
+            assert!(span.underline, "{kind}: underline");
         }
     }
 }
-

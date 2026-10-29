@@ -13,6 +13,24 @@ services:
       - "8222:8222"
     networks:
       - monitoring
+  telegram-bot-api:
+    container_name: telegram-bot-api
+    hostname: telegram-bot-api
+    image: ghcr.io/lyosu/telegram-bot-api:custom
+    networks:
+      - monitoring
+    environment:
+      - TELEGRAM_API_ID
+      - TELEGRAM_API_HASH
+      - TELEGRAM_LOCAL=true
+      - TELEGRAM_MAX_PENDING_UPDATES=10000
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    restart: unless-stopped
+
   bot:
     container_name: telegram-bot
     hostname: telegram-bot
@@ -24,8 +42,11 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+      telegram-bot-api:
+        condition: service_started
     environment:
       - BOT_TOKEN
+      - BOT_API_URL=http://telegram-bot-api:8081
       - NATS_URL=nats://nats:4222
       - LOG_LVL
       - LOG_PATH
@@ -60,3 +81,6 @@ services:
 
 networks:
   monitoring:
+
+volumes:
+  telegram-bot-api-data:

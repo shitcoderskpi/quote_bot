@@ -45,60 +45,79 @@ def paint(color: str, text: str) -> str:
 
 @dataclass
 class FakeMessage:
-    grad_id: int
     username: str
     content: str
+    sender_index: int = 0
+    color_index: int = 0
     user_status: Optional[str] = None
     user_role: Optional[str] = "member"
     entities: list = field(default_factory=list)
     image_bytes: Optional[bytes] = None
-    chat_id: int = 123456789
     message_id: int = field(default_factory=lambda: next(message_ids))
-    dpi: Optional[int] = None
-    theme: str = "light"
 
     def __post_init__(self):
+        units = len(self.content.encode("utf-16-le")) // 2
         for ent in self.entities:
-            if ent["offset"] < 0 or ent["offset"] + ent["length"] > len(self.content):
+            if ent["offset"] < 0 or ent["offset"] + ent["length"] > units:
                 raise ValueError(f"entity out of range: {ent} in {self.content!r}")
 
-    def to_protobuf_bytes(self) -> bytes:
-        msg = quote_pb2.SerializableMessage()
-        msg.grad_id = self.grad_id
-        msg.username = self.username
+    def to_pb(self) -> "quote_pb2.QuoteMessage":
+        msg = quote_pb2.QuoteMessage(message_id=self.message_id, content=self.content)
+        author = msg.author
+        author.sender_index = self.sender_index
+        author.color_index = self.color_index
+        author.username = self.username
         if self.user_status is not None:
-            msg.user_status = self.user_status
+            author.user_status = self.user_status
         if self.user_role is not None:
-            msg.user_role = self.user_role
-        msg.content = self.content
+            author.user_role = self.user_role
         if self.image_bytes is not None:
             msg.image = self.image_bytes
-        if self.dpi is not None:
-            msg.dpi = self.dpi
-        if self.theme != "light":
-            msg.theme = self.theme
-        msg.message_id = self.message_id
-        msg.chat_id = self.chat_id
         for ent in self.entities:
             pb_ent = msg.entities.add()
             pb_ent.type = ent["type"]
             pb_ent.offset = ent["offset"]
             pb_ent.length = ent["length"]
-        return msg.SerializeToString()
+        return msg
+
+
+@dataclass
+class FakeQuote:
+    messages: list[FakeMessage]
+    chat_id: int = 123456789
+    theme: str = "light"
+    dpi: Optional[int] = None
+
+    @property
+    def message_id(self) -> int:
+        return self.messages[0].message_id
+
+    def to_protobuf_bytes(self) -> bytes:
+        req = quote_pb2.QuoteRequest(chat_id=self.chat_id, theme=self.theme)
+        if self.dpi is not None:
+            req.dpi = self.dpi
+        req.messages.extend(m.to_pb() for m in self.messages)
+        return req.SerializeToString()
 
     def to_job(self) -> bytes:
         return compressor.compress(self.to_protobuf_bytes())
 
 
-def build_tests() -> dict[str, FakeMessage]:
+def solo(
+    chat_id: int = 123456789, theme: str = "light", dpi: Optional[int] = None, **kw
+) -> FakeQuote:
+    return FakeQuote([FakeMessage(**kw)], chat_id=chat_id, theme=theme, dpi=dpi)
+
+
+def build_tests() -> dict[str, FakeQuote]:
     return {
-        "basic": FakeMessage(
-            grad_id=3,
+        "basic": solo(
+            color_index=3,
             username="Test User",
             content="Hello, this is a test message!",
         ),
-        "dark_theme": FakeMessage(
-            grad_id=5,
+        "dark_theme": solo(
+            color_index=5,
             username="Dark Mode Fan",
             user_status="Premium",
             user_role="administrator",
@@ -106,14 +125,14 @@ def build_tests() -> dict[str, FakeMessage]:
             chat_id=111111111,
             theme="dark",
         ),
-        "custom_dpi": FakeMessage(
-            grad_id=1,
+        "custom_dpi": solo(
+            color_index=1,
             username="Hi-DPI User",
             content="Rendering at 150 DPI",
             dpi=150,
         ),
-        "with_entities": FakeMessage(
-            grad_id=2,
+        "with_entities": solo(
+            color_index=2,
             username="Entity User",
             content="Hello bold and italic world",
             entities=[
@@ -121,8 +140,8 @@ def build_tests() -> dict[str, FakeMessage]:
                 {"type": "italic", "offset": 15, "length": 6},
             ],
         ),
-        "more_entities": FakeMessage(
-            grad_id=3,
+        "more_entities": solo(
+            color_index=3,
             username="More Entities User",
             content="Spoiler text, code here, and underline!",
             entities=[
@@ -131,8 +150,8 @@ def build_tests() -> dict[str, FakeMessage]:
                 {"type": "underline", "offset": 29, "length": 9},
             ],
         ),
-        "all_entities": FakeMessage(
-            grad_id=4,
+        "all_entities": solo(
+            color_index=4,
             username="All Entities",
             content="b i u s code pre spoiler link mention emoji",
             entities=[
@@ -148,8 +167,8 @@ def build_tests() -> dict[str, FakeMessage]:
                 {"type": "custom_emoji", "offset": 38, "length": 5},
             ],
         ),
-        "long_text": FakeMessage(
-            grad_id=6,
+        "long_text": solo(
+            color_index=6,
             username="Verbose User",
             user_status="Long statusgvgv",
             content=(
@@ -159,11 +178,117 @@ def build_tests() -> dict[str, FakeMessage]:
                 "more sentences to really push the wrapping logic. 🚀✨🔥"
             ),
         ),
-        "no_avatar": FakeMessage(
-            grad_id=4,
+        "no_avatar": solo(
+            color_index=4,
             username="No Avatar User",
             content="User without a profile photo",
             image_bytes=b"",
+        ),
+        "multi_same_sender": FakeQuote(
+            [
+                FakeMessage("Alice Smith", "First message in the run", color_index=2),
+                FakeMessage("Alice Smith", "Second message", color_index=2),
+                FakeMessage("Alice Smith", "Third and last message", color_index=2),
+            ]
+        ),
+        "multi_two_groups": FakeQuote(
+            [
+                FakeMessage("Alice Smith", "Hi!", sender_index=0, color_index=2),
+                FakeMessage(
+                    "Alice Smith", "Anyone around?", sender_index=0, color_index=2
+                ),
+                FakeMessage("Bob", "Yep, here", sender_index=1, color_index=5),
+                FakeMessage("Bob", "What's up?", sender_index=1, color_index=5),
+            ]
+        ),
+        "multi_alternating": FakeQuote(
+            [
+                FakeMessage("Alice Smith", "Question?", sender_index=0, color_index=2),
+                FakeMessage("Bob", "Answer.", sender_index=1, color_index=5),
+                FakeMessage("Alice Smith", "Thanks!", sender_index=0, color_index=2),
+            ]
+        ),
+        "multi_entities": FakeQuote(
+            [
+                FakeMessage("Entity User", "plain text, no entities", color_index=1),
+                FakeMessage(
+                    "Entity User",
+                    "Hello bold and italic world",
+                    color_index=1,
+                    entities=[
+                        {"type": "bold", "offset": 6, "length": 4},
+                        {"type": "italic", "offset": 15, "length": 6},
+                    ],
+                ),
+                FakeMessage(
+                    "Entity User",
+                    "code here and a link",
+                    color_index=1,
+                    entities=[
+                        {"type": "code", "offset": 0, "length": 4},
+                        {"type": "text_link", "offset": 16, "length": 4},
+                    ],
+                ),
+            ]
+        ),
+        "multi_roles": FakeQuote(
+            [
+                FakeMessage(
+                    "Admin Person",
+                    "Reminder: be nice",
+                    sender_index=0,
+                    color_index=3,
+                    user_status="Moderator",
+                    user_role="administrator",
+                ),
+                FakeMessage(
+                    "Admin Person",
+                    "Rules are pinned",
+                    sender_index=0,
+                    color_index=3,
+                    user_status="Moderator",
+                    user_role="administrator",
+                ),
+                FakeMessage(
+                    "The Creator",
+                    "Thanks all",
+                    sender_index=1,
+                    color_index=0,
+                    user_status="Owner",
+                    user_role="creator",
+                ),
+            ],
+            theme="dark",
+        ),
+        "multi_avatar": FakeQuote(
+            [
+                FakeMessage("Pic User", "Message one", sender_index=0),
+                FakeMessage("Pic User", "Message two", sender_index=0),
+                FakeMessage("No Pic", "I have initials", sender_index=1, color_index=4),
+            ]
+        ),
+        "multi_long": FakeQuote(
+            [
+                FakeMessage("Verbose User", f"Message number {i}", color_index=6)
+                for i in range(5)
+            ]
+            + [
+                FakeMessage(
+                    "Verbose User",
+                    "This is a much longer message to test word wrapping inside a group. "
+                    * 3,
+                    color_index=6,
+                )
+            ]
+        ),
+        "multi_hidpi": FakeQuote(
+            [
+                FakeMessage(
+                    "Alice Smith", "High DPI, first", sender_index=0, color_index=2
+                ),
+                FakeMessage("Bob", "High DPI, second", sender_index=1, color_index=5),
+            ],
+            dpi=150,
         ),
     }
 
@@ -198,14 +323,18 @@ async def run_test(
     print(f"\n{'-' * 60}")
     print(f"  {Colors.BOLD}{Colors.CYAN}TEST: {name}{Colors.RESET}")
     print(f"{'-' * 60}")
-    print(f"  username : {msg.username}")
-    print(f"  content  : {msg.content[:60]}{'...' if len(msg.content) > 60 else ''}")
     print(f"  theme    : {msg.theme}")
     print(f"  dpi      : {msg.dpi or 'default'}")
+    senders = len({m.sender_index for m in msg.messages})
     print(
-        f"  avatar   : {'yes' if msg.image_bytes else 'no'} ({len(msg.image_bytes or b'')} bytes)"
+        f"  messages : {len(msg.messages)} ({senders} sender{'s' if senders != 1 else ''})"
     )
-    print(f"  entities : {len(msg.entities)}")
+    for i, m in enumerate(msg.messages):
+        avatar = f"{len(m.image_bytes)}B" if m.image_bytes else "no"
+        print(
+            f"  [{i}] s{m.sender_index} {m.username}: {m.content[:40]!r}"
+            f"{'...' if len(m.content) > 40 else ''} (avatar {avatar}, {len(m.entities)} entities)"
+        )
 
     payload = msg.to_protobuf_bytes()
     compressed = compressor.compress(payload)
@@ -302,8 +431,8 @@ async def run_load_test(nc, js, total: int, idle_timeout: float) -> bool:
             done.set()
 
     sub = await nc.subscribe(RESULTS_QUEUE, cb=on_result)
-    job = FakeMessage(
-        grad_id=4,
+    job = solo(
+        color_index=4,
         username="All Entities",
         content="b i u s code pre spoiler link mention emoji",
         entities=[
@@ -432,7 +561,7 @@ async def wait_until_ready(
             if now >= deadline:
                 print(paint(Colors.RED, "Timed out waiting for generator"))
                 return False
-            probe = FakeMessage(grad_id=3, username="Probe", content="probe")
+            probe = solo(color_index=3, username="Probe", content="probe")
             await js.publish(JOBS_QUEUE, probe.to_job())
             try:
                 await await_result(

@@ -4,8 +4,9 @@ use crate::primitives::node::{Node, Style};
 use crate::primitives::paint::Paint;
 use crate::primitives::shape::ShapeKind;
 use crate::primitives::text::{RichText, SpoilerStyle};
-use steel::rvals::{Custom, FromSteelVal, SteelVal};
+use steel::rvals::{Custom, FromSteelVal, SteelString, SteelVal};
 use taffy::prelude::*;
+use crate::proto::quote::Entity;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SchemeNumber(pub f64);

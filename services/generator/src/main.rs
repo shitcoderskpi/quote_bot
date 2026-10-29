@@ -31,14 +31,16 @@ async fn process_job(
     webp_buf: &mut Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message;
-    let mut input_msg = proto::quote::SerializableMessage::decode(raw)?;
-    
-    let dpi = input_msg.dpi.unwrap_or(cfg.dpi as i32) as f32;
-    let theme = if input_msg.theme.is_empty() { "light" } else { &input_msg.theme };
+    let req = proto::quote::QuoteRequest::decode(raw)?;
+
+    let chat_id = req.chat_id;
+    let message_id = req.messages.first().map(|m| m.message_id).unwrap_or(0);
+    let dpi = req.dpi.unwrap_or(cfg.dpi as u32) as f32;
+    let theme = if req.theme.is_empty() { "light" } else { &req.theme };
 
     let executable = themes.get(theme).ok_or_else(|| format!("Template {} not found", theme))?;
 
-    let node_tree = templater.render_template(executable, &mut input_msg)?;
+    let node_tree = templater.render_template(executable, req)?;
 
     let viewport = primitives::Viewport { width: 1.0, height: 1.0 };
 
@@ -70,8 +72,8 @@ async fn process_job(
 
     let result_img = proto::quote::ResultImage {
         image: std::mem::take(webp_buf),
-        message_id: input_msg.message_id,
-        chat_id: input_msg.chat_id,
+        message_id,
+        chat_id,
     };
     
     pb_buf.clear();
