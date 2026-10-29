@@ -16,16 +16,22 @@ services:
   telegram-bot-api:
     container_name: telegram-bot-api
     hostname: telegram-bot-api
-    image: ghcr.io/lyosu/telegram-bot-api:custom
+    build:
+      context: ../extern/telegram-bot-api
+      args:
+        TARGETARCH: amd64
+    command:
+      - --local
+      - --http-port=8081
+      - --http-stat-port=8082
     networks:
       - monitoring
     environment:
       - TELEGRAM_API_ID
       - TELEGRAM_API_HASH
-      - TELEGRAM_LOCAL=true
       - TELEGRAM_MAX_PENDING_UPDATES=10000
     volumes:
-      - telegram-bot-api-data:/var/lib/telegram-bot-api
+      - telegram-bot-api-data:/data
     ports:
       - "8081:8081"
       - "8082:8082"

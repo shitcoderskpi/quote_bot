@@ -98,25 +98,34 @@ func userAvatar(b *gotgbot.Bot, userID int64) []byte {
 
 func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 	return func(b *gotgbot.Bot, ctx *ext.Context) error {
+		const maxQuoteMessages = 50
 		msg := ctx.EffectiveMessage
 		var dpi *int
+		count := 1
 		theme := "light"
 
 		args := ctx.Args()
 		if len(args) > 1 {
 			for _, arg := range args[1:] {
 				argLower := strings.ToLower(arg)
-				if argLower == "dark" || argLower == "light" {
+				switch {
+				case argLower == "dark" || argLower == "light":
 					theme = argLower
-				} else {
+				case strings.HasPrefix(argLower, "x"):
+					n, err := strconv.Atoi(argLower[1:])
+					if err != nil || n < 1 {
+						_, _ = msg.Reply(b, "Message count must look like `xN` e.g. `x3`.", nil)
+						return nil
+					}
+					count = min(n, maxQuoteMessages)
+				default:
 					parsed, err := strconv.Atoi(argLower)
-					if err == nil {
-						parsed = min(max(parsed, 72), 300)
-						dpi = &parsed
-					} else {
+					if err != nil {
 						_, _ = msg.Reply(b, "DPI must be an integer, or theme must be 'dark'/'light'.", nil)
 						return nil
 					}
+					parsed = min(max(parsed, 72), 300)
+					dpi = &parsed
 				}
 			}
 		}
@@ -131,61 +140,43 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 			return nil
 		}
 
-		chatMember, err := b.GetChatMember(reply.Chat.Id, reply.From.Id, nil)
-		if err != nil {
-			log.Printf("Failed to get chat member: %v", err)
-		}
+		cache := newSenderCache(b, reply.Chat.Id)
+		var qmsgs []*pb.QuoteMessage
+		var senderOf []*sender
 
-		userStatus := ""
-		customTitle := ""
-		if chatMember != nil {
-			userStatus = chatMember.GetStatus()
-			if admin, ok := chatMember.(gotgbot.ChatMemberAdministrator); ok {
-				customTitle = admin.CustomTitle
+		for _, m := range quotedMessages(b, reply, count) {
+			if m.From == nil {
+				continue
 			}
-			if owner, ok := chatMember.(gotgbot.ChatMemberOwner); ok {
-				customTitle = owner.CustomTitle
+			text, ents := messageText(&m)
+			if text == "" {
+				continue
 			}
-			// TODO: fetch regular user statuses
+			s := cache.get(m.From)
+			senderOf = append(senderOf, s)
+			qmsgs = append(qmsgs, &pb.QuoteMessage{
+				MessageId: m.MessageId,
+				Author:    s.author,
+				Content:   text,
+				Entities:  convertEntities(text, ents),
+			})
 		}
-		if userStatus == "" {
-			userStatus = "member"
-		}
-
-		avatar := userAvatar(b, reply.From.Id)
-
-		var text string
-		var entities []gotgbot.MessageEntity
-		if reply.Text != "" {
-			text = reply.Text
-			entities = reply.Entities
-		} else if reply.Caption != "" {
-			text = reply.Caption
-			entities = reply.CaptionEntities
+		if len(qmsgs) == 0 {
+			_, _ = msg.Reply(b, "Nothing to quote: no text messages found.", nil)
+			return nil
 		}
 
-		convertedEntities := convertEntities(text, entities)
+		for i, qm := range qmsgs {
+			if i+1 == len(qmsgs) || senderOf[i+1] != senderOf[i] {
+				qm.Image = senderOf[i].avatar
+			}
+		}
 
-		senders := senderIndexer{}
 		quoteReq := &pb.QuoteRequest{
-			ChatId: reply.Chat.Id,
-			Theme:  theme,
-			Dpi:    optionalUint32(dpi),
-			Messages: []*pb.QuoteMessage{
-				{
-					MessageId: reply.MessageId,
-					Author: &pb.Author{
-						SenderIndex: senders.of(reply.From.Id),
-						ColorIndex:  int32(reply.From.Id % 7),
-						Username:    reply.From.FirstName,
-						UserStatus:  optionalString(customTitle),
-						UserRole:    new(userStatus),
-					},
-					Content:  text,
-					Entities: convertedEntities,
-					Image:    avatar,
-				},
-			},
+			ChatId:   reply.Chat.Id,
+			Theme:    theme,
+			Dpi:      optionalUint32(dpi),
+			Messages: qmsgs,
 		}
 
 		pbData, err := proto.Marshal(quoteReq)

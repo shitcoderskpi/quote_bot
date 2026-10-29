@@ -2,6 +2,7 @@ mod types;
 mod functions;
 pub mod image;
 
+use smallvec::SmallVec;
 use crate::primitives::node::Node;
 use crate::proto::quote::{Author, QuoteMessage, QuoteRequest};
 use crate::templater::image::SteelImage;
@@ -84,6 +85,7 @@ impl Templater {
                 ..Default::default()
             });
 
+        // TODO: NO SSO!!! BAD!!!
         let initials: String = username
             .split_whitespace()
             .take(2)
@@ -123,26 +125,23 @@ impl Templater {
     pub fn update_payload(&mut self, req: QuoteRequest) -> Result<(), SteelErr> {
         let QuoteRequest { theme, messages, .. } = req;
 
-        // TODO: BAD
-        let keys: Vec<Option<u32>> = messages
-            .iter()
-            .map(|m| m.author.as_ref().map(|a| a.sender_index))
-            .collect();
+
         let n = messages.len();
         let s = &self.symbols;
-
-        let list = messages
-            .into_iter()
-            .enumerate()
-            .map(|(i, m)| {
-                let start = i == 0 || keys[i - 1] != keys[i];
-                let end = i + 1 == n || keys[i + 1] != keys[i];
-                Self::message_to_steel(s, m, start, end)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut iter = messages.into_iter().peekable();
+        let mut prev: Option<Option<u32>> = None;
+        let mut list = Vec::with_capacity(n);
+        while let Some(m) = iter.next() {
+            let key = m.author.as_ref().map(|a| a.sender_index);
+            let next = iter.peek().map(|nm| nm.author.as_ref().map(|a| a.sender_index));
+            let start = prev != Some(key);
+            let end = next != Some(key);
+            list.push(Self::message_to_steel(s, m, start, end)?);
+            prev = Some(key);
+        }
 
         let mut payload = HashMap::new();
-        // TODO: also BAD
+        // TODO: Alloc I'm sure.
         payload.insert(s.messages.clone(), SteelVal::ListV(list.into_iter().collect()));
         payload.insert(s.theme.clone(), SteelVal::StringV(theme.into()));
 

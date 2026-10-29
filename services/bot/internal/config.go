@@ -27,7 +27,7 @@ func LoadConfig() Config {
 
 	return Config{
 		BotToken:  botToken,
-		BotApiUrl: envDefault("BOT_API_URL", ""),
+		BotApiUrl: envDefault("BOT_API_URL", "api.telegram.org"),
 		NatsUrl:   envDefault("NATS_URL", "nats://localhost:4222"),
 		LogPath:   os.Getenv("LOG_PATH"),
 	}
