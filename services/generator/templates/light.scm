@@ -9,14 +9,14 @@
 
 (define (status-color role)
   (cond
-    [(equal? role "creator")       (hex "#40A920")]
-    [(equal? role "administrator") (hex "#955CDB")]
+    [(equal? role "creator")       (hex "#955CDB")]
+    [(equal? role "administrator") (hex "#40A920")]
     [else                          (hex "#999999")]))
 
 (define (status-bg role)
   (cond
-    [(equal? role "creator")       (hex "#40A9201F")]
-    [(equal? role "administrator") (hex "#955CDB1F")]
+    [(equal? role "creator")       (hex "#955CDB1F")]
+    [(equal? role "administrator") (hex "#40A9201F")]
     [else                          (hex "#00000000")]))
 
 (define (avatar m)

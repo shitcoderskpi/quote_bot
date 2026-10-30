@@ -155,7 +155,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 		reply := msg.ReplyToMessage
 		if reply == nil {
 			_, _ = msg.Reply(b, "Please specify a message for quote generation", nil)
-			return nil
+			return nillog
 		}
 		if reply.From == nil {
 			_, _ = msg.Reply(b, "Can't quote messages without an author", nil)
