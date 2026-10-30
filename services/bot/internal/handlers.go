@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,21 @@ import (
 var avatarClient = &http.Client{Timeout: 10 * time.Second}
 
 type senderIndexer map[int64]uint32
+
+const botAPIDataDir = "/data"
+
+func readLocalFile(token, filePath string) ([]byte, bool) {
+	p := filePath
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(botAPIDataDir, token, filepath.Clean("/"+filePath))
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		log.Printf("avatar: read %q: %v", p, err)
+		return nil, false
+	}
+	return data, true
+}
 
 func (s senderIndexer) of(userID int64) uint32 {
 	if idx, ok := s[userID]; ok {
@@ -60,16 +77,22 @@ func userAvatar(b *gotgbot.Bot, userID int64) []byte {
 		log.Printf("Failed to get profile photos for user %d: %v", userID, err)
 		return nil
 	}
-	if photos.TotalCount == 0 {
+	if photos.TotalCount == 0 || len(photos.Photos) == 0 || len(photos.Photos[0]) == 0 {
 		log.Printf("User %d does not have any photos", userID)
 		return nil
 	}
 
-	file, err := b.GetFile(photos.Photos[0][0].FileId, nil)
+	sizes := photos.Photos[0]
+	file, err := b.GetFile(sizes[0].FileId, nil)
 	if err != nil {
 		log.Printf("Failed to get profile photo file for user %d: %v", userID, err)
 		return nil
 	}
+
+	if data, ok := readLocalFile(b.Token, file.FilePath); ok {
+		return data
+	}
+	log.Printf("avatar: local read failed for %q, trying HTTP", file.FilePath)
 
 	resp, err := avatarClient.Get(file.URL(b, nil))
 	if err != nil {
@@ -77,8 +100,7 @@ func userAvatar(b *gotgbot.Bot, userID int64) []byte {
 		return nil
 	}
 	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
+		if err := Body.Close(); err != nil {
 			log.Printf("Failed to close response body reader: %v", err)
 		}
 	}(resp.Body)

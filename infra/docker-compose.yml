@@ -21,7 +21,6 @@ services:
       args:
         TARGETARCH: amd64
     command:
-      - --local
       - --http-port=8081
       - --http-stat-port=8082
     networks:
@@ -60,6 +59,7 @@ services:
       - "8000:8000"
     volumes:
       - ../services/logs:/app/logs
+      - telegram-bot-api-data:/data:ro
 
   generator:
     container_name: generator

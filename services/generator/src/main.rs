@@ -34,7 +34,7 @@ async fn process_job(
     let req = proto::quote::QuoteRequest::decode(raw)?;
 
     let chat_id = req.chat_id;
-    let message_id = req.messages.first().map(|m| m.message_id).unwrap_or(0);
+    let message_id = req.messages.last().map(|m| m.message_id).unwrap_or(0);
     let dpi = req.dpi.unwrap_or(cfg.dpi as u32) as f32;
     let theme = if req.theme.is_empty() { "light" } else { &req.theme };
 

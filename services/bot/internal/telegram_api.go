@@ -84,25 +84,24 @@ func messageText(m *gotgbot.Message) (string, []gotgbot.MessageEntity) {
 }
 
 func quotedMessages(b *gotgbot.Bot, first *gotgbot.Message, count int) []gotgbot.Message {
-	out := []gotgbot.Message{*first}
 	if count <= 1 || !IsLocalAPI(b) {
 		if count > 1 {
 			log.Printf("multi-quote requested but IsLocalAPI=false; quoting one message")
 		}
-		return out
+		return []gotgbot.Message{*first}
 	}
 
 	ids := make([]int64, 0, count-1)
-	for i := 1; i < count; i++ {
-		ids = append(ids, first.MessageId+int64(i))
+	for i := 1; i < count && first.MessageId-int64(i) > 0; i++ {
+		ids = append(ids, first.MessageId-int64(i))
 	}
 	got, err := GetMessages(b, first.Chat.Id, ids)
 	if err != nil {
 		log.Printf("getMessages failed, quoting a single message: %v", err)
-		return out
+		return []gotgbot.Message{*first}
 	}
 	sort.Slice(got, func(i, j int) bool { return got[i].MessageId < got[j].MessageId })
-	return append(out, got...)
+	return append(got, *first)
 }
 
 func GetMessages(b *gotgbot.Bot, chatID int64, messageIDs []int64) ([]gotgbot.Message, error) {
