@@ -1,7 +1,8 @@
-use std::ops::Range;
-use parley::{GlyphRun, Run};
-use vello::peniko::Brush;
 use crate::primitives::text::Span;
+use parley::Run;
+use smallvec::SmallVec;
+use std::ops::Range;
+use vello::kurbo::BezPath;
 
 pub struct SpoilerSegment {
     pub start: f64,
@@ -15,13 +16,12 @@ fn is_overlapping(span: &Span, cluster_range: &Range<usize>) -> bool {
 }
 
 
-pub fn spoiler_segments<'a>(
-    glyph_run: &GlyphRun<Brush>,
-    run: &Run<Brush>,
+pub(crate) fn spoiler_segments<'a>(
+    run: &Run<crate::primitives::paint::Paint>,
     spans: impl Iterator<Item = &'a Span>,
-) -> Vec<SpoilerSegment> {
-    let run_start_x = glyph_run.offset() as f64;
-    let mut segments = Vec::new();
+    run_start_x: f64,
+) -> SmallVec<[SpoilerSegment; 2]> {
+    let mut segments = SmallVec::<[SpoilerSegment; 2]>::new();
 
     for span in spans {
         let mut cx = run_start_x;
@@ -42,7 +42,6 @@ pub fn spoiler_segments<'a>(
             } else if seg.is_some() {
                 break;
             }
-
             cx += cw;
         }
 
@@ -50,6 +49,5 @@ pub fn spoiler_segments<'a>(
             segments.push(SpoilerSegment { start: x_start, end: seg_end_x, text_range: byte_start..seg_end_byte });
         }
     }
-
     segments
 }

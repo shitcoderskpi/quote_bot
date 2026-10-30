@@ -122,23 +122,37 @@ Creates a text node. First arg is the string content; remaining args are text mo
 
 #### Text modifiers
 
-| Call                  | Description                                       |
-|-----------------------|---------------------------------------------------|
-| `(size (unit))`       | Font size                                         |
-| `(color COLOR)`       | Text color                                        |
-| `(family STR)`        | Font family name. `"sans-serif"`, `"Inter"`, etc. |
-| `(weight N)`          | Font weight                                       |
-| `(italic)`            | Sets italic font style                            |
-| `(underline)`         | Adds an underline                                 |
-| `(strikethrough)`     | Adds a strikethrough                              |
-| `(link-color C)`      | Sets color for links                              |
-| `(code-color C)`      | Sets font family for inline code                  |
-| `(code-family S)`     | Sets font family for inline code                  |
-| `(line-height N)`     | Sets relative line height                         |
-| `(wrap BOOL)`         | Sets whether text should wrap (`#t` or `#f`)      |
-| `(overflow-wrap SYM)` | `'normal`, `'anywhere`, `'break-word`             |
-| `(align SYM)`         | `'start`, `'center`, `'end`, `'justify`           |
-| `(spoiler SYM)`       | `'none`, `'tg-masked`, `'tg-overlay`, `'fade`     |
+| Call                  | Description                                                |
+|-----------------------|------------------------------------------------------------|
+| `(size (unit))`       | Font size                                                  |
+| `(color COLOR)`       | Text color                                                 |
+| `(family STR)`        | Font family name. `"sans-serif"`, `"Inter"`, etc.          |
+| `(weight N)`          | Font weight                                                |
+| `(italic)`            | Sets italic font style                                     |
+| `(underline)`         | Adds an underline                                          |
+| `(strikethrough)`     | Adds a strikethrough                                       |
+| `(link-color C)`      | Sets color for links                                       |
+| `(code-color C)`      | Sets font family for inline code                           |
+| `(code-family S)`     | Sets font family for inline code                           |
+| `(line-height N)`     | Sets relative line height                                  |
+| `(wrap BOOL)`         | Sets whether text should wrap (`#t` or `#f`)               |
+| `(overflow-wrap SYM)` | `'normal`, `'anywhere`, `'break-word`                      |
+| `(align SYM)`         | `'start`, `'center`, `'end`, `'justify`                    |
+| `(spoiler SYM)`       | `'none`, `'tg-masked`, `'tg-overlay`, `'redacted`, `'fade` |
+
+### Apply Telegram richtext entities to a text
+You can say the engine that this text field is the one getting Telegram entities using keyword parameter AFTER the content string:
+```scheme
+(text "Hello world" #:entities g-entities
+  (size 15)
+  (color (hex "#000"))
+  (family "Inter")
+  (weight 700)
+  (align 'center))
+```
+
+> [!NOTE]
+> `g-entities` is a list of Telegram richtext entities that's passed to the script as input data. Default is `#f`.
 
 ---
 

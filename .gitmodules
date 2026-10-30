@@ -4,3 +4,6 @@
 [submodule "services/template_engine"]
 	path = services/template_engine
 	url = https://github.com/shitcoderskpi/template_engine
+[submodule "extern/telegram-bot-api"]
+	path = extern/telegram-bot-api
+	url = https://github.com/LyoSU/telegram-bot-api

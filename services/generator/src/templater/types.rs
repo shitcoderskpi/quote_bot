@@ -1,9 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use crate::primitives::node::{Node, Style};
 use crate::primitives::paint::Paint;
 use crate::primitives::shape::ShapeKind;
 use crate::primitives::text::{RichText, SpoilerStyle};
-use steel::rvals::{Custom, FromSteelVal, SteelVal};
+use steel::rvals::{Custom, FromSteelVal, SteelString, SteelVal};
 use taffy::prelude::*;
+use crate::proto::quote::Entity;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SchemeNumber(pub f64);
@@ -73,32 +76,32 @@ impl SchemeDimension {
 }
 
 #[derive(Clone, Debug)]
-pub struct SchemeColor(pub vello::peniko::Color);
-impl Custom for SchemeColor {}
+pub struct SteelColor(pub vello::peniko::Color);
+impl Custom for SteelColor {}
 
 #[derive(Clone, Debug)]
-pub struct SchemePaint(pub Paint);
-impl Custom for SchemePaint {}
+pub struct SteelPaint(pub Paint);
+impl Custom for SteelPaint {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeAngle(pub f64);
-impl Custom for SchemeAngle {}
+pub struct SteelAngle(pub f64);
+impl Custom for SteelAngle {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeStop {
+pub struct SteelStop {
     pub offset: f32,
     pub color: vello::peniko::Color,
 }
-impl Custom for SchemeStop {}
+impl Custom for SteelStop {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeShapeKind {
+pub struct SteelShapeKind {
     pub kind: ShapeKind,
     pub width: Option<f32>,
     pub height: Option<f32>,
 }
 
-impl SchemeShapeKind {
+impl SteelShapeKind {
     pub fn new(kind: ShapeKind) -> Self {
         Self { kind, width: None, height: None }
     }
@@ -108,7 +111,7 @@ impl SchemeShapeKind {
     }
 }
 
-impl Custom for SchemeShapeKind {}
+impl Custom for SteelShapeKind {}
 
 #[derive(Clone, Debug)]
 pub enum StyleMod {
@@ -149,8 +152,8 @@ impl StyleMod {
     pub fn apply(&self, style: &mut Style) {
         match self {
             StyleMod::Direction(d) => style.layout.flex_direction = *d,
-            StyleMod::AlignItems(a) => style.layout.align_items = *a,
-            StyleMod::JustifyContent(j) => style.layout.justify_content = *j,
+            StyleMod::AlignItems(a) => style.layout.align_items = a.unwrap_or_default(),
+            StyleMod::JustifyContent(j) => style.layout.justify_content = j.unwrap_or_default(),
             StyleMod::Display(d) => style.layout.display = *d,
             StyleMod::Position(p) => style.layout.position = *p,
             StyleMod::Width(d) => style.layout.size.width = d.to_dimension(),
@@ -219,7 +222,7 @@ impl StyleMod {
 #[derive(Clone, Debug)]
 pub enum TextMod {
     Size(SchemeDimension),
-    Color(vello::peniko::Color),
+    Brush(Paint),
     Family(String),
     Weight(parley::FontWeight),
     Italic,
@@ -227,8 +230,8 @@ pub enum TextMod {
     Strikethrough,
     LineHeight(f32),
     Align(crate::primitives::text::TextAlign),
-    LinkColor(vello::peniko::Color),
-    CodeColor(vello::peniko::Color),
+    LinkBrush(Paint),
+    CodeBrush(Paint),
     CodeFamily(String),
     Wrap(bool),
     OverflowWrap(parley::OverflowWrap),
@@ -238,7 +241,7 @@ pub enum TextMod {
 impl Custom for TextMod {}
 
 impl TextMod {
-    pub fn apply(&self, rich: &mut RichText) {
+    pub fn apply(&mut self, rich: &mut RichText) {
         match self {
             TextMod::Size(d) => {
                 let s = match d {
@@ -249,7 +252,7 @@ impl TextMod {
                 rich.default_font_size = s;
                 rich.root_font_size = s;
             }
-            TextMod::Color(c) => rich.default_color = *c,
+            TextMod::Brush(b) => rich.default_color = b.clone(),
             TextMod::Family(f) => rich.default_family = f.clone(),
             TextMod::Weight(w) => rich.default_weight = *w,
             TextMod::Italic => rich.default_italic = true,
@@ -260,7 +263,7 @@ impl TextMod {
             TextMod::Wrap(w) => rich.wrap = *w,
             TextMod::OverflowWrap(ow) => rich.overflow_wrap = *ow,
             TextMod::SpoilerStyle(s) => rich.spoiler_style = *s,
-            TextMod::LinkColor(_) | TextMod::CodeFamily(_) | TextMod::CodeColor(_) => {}
+            TextMod::LinkBrush(_) | TextMod::CodeFamily(_) | TextMod::CodeBrush(_) => {}
         }
     }
 }
@@ -273,11 +276,11 @@ pub enum ShapeMod {
 impl Custom for ShapeMod {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeNode(pub Node);
+pub struct SchemeNode(pub Rc<RefCell<Option<Node>>>);
 impl Custom for SchemeNode {}
 
 #[derive(Clone, Debug)]
-pub struct SchemeStyle(pub Style);
+pub struct SchemeStyle(pub Rc<RefCell<Option<Style>>>);
 impl Custom for SchemeStyle {}
 
 #[derive(Clone, Debug)]
@@ -285,15 +288,37 @@ pub struct SchemeRichText(pub RichText);
 impl Custom for SchemeRichText {}
 
 #[derive(Clone, Debug, Default)]
-pub struct TextContext {
-    pub content: String,
-    pub entities: Vec<serde_json::Value>,
+pub struct TextEntities(pub Box<[crate::proto::quote::Entity]>);
+impl Custom for TextEntities {}
+
+impl IntoIterator for TextEntities {
+    type Item = crate::proto::quote::Entity;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_vec().into_iter()
+    }
 }
-impl Custom for TextContext {}
+
+impl<'a> IntoIterator for &'a TextEntities {
+    type Item = &'a crate::proto::quote::Entity;
+    type IntoIter = std::slice::Iter<'a, crate::proto::quote::Entity>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl TextEntities {
+    pub fn as_slice(&self) -> &[crate::proto::quote::Entity] {
+        &self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vello::peniko::Color;
 
     fn epsilon() -> f32 {
         0.0001
@@ -368,14 +393,14 @@ mod tests {
     fn style_mod_align_items() {
         let mut style = Style::default();
         StyleMod::AlignItems(Some(AlignItems::CENTER)).apply(&mut style);
-        assert_eq!(style.layout.align_items, Some(AlignItems::CENTER));
+        assert_eq!(style.layout.align_items, AlignItems::CENTER);
     }
 
     #[test]
     fn style_mod_justify_content() {
         let mut style = Style::default();
         StyleMod::JustifyContent(Some(JustifyContent::SPACE_BETWEEN)).apply(&mut style);
-        assert_eq!(style.layout.justify_content, Some(JustifyContent::SPACE_BETWEEN));
+        assert_eq!(style.layout.justify_content, JustifyContent::SPACE_BETWEEN);
     }
 
     #[test]
@@ -545,8 +570,8 @@ mod tests {
     #[test]
     fn text_mod_color() {
         let mut rt = RichText::plain("x");
-        TextMod::Color(vello::peniko::Color::WHITE).apply(&mut rt);
-        assert_eq!(rt.default_color, vello::peniko::Color::WHITE);
+        TextMod::Brush(Paint::solid(Color::WHITE)).apply(&mut rt);
+        assert!(matches!(rt.default_color, Paint::Solid(c) if c == Color::WHITE));
     }
 
     #[test]
@@ -602,31 +627,30 @@ mod tests {
     #[test]
     fn text_mod_link_color_and_code_family_are_noops() {
         let mut rt = RichText::plain("x");
-        let before_color = rt.default_color;
         let before_family = rt.default_family.clone();
-        TextMod::LinkColor(vello::peniko::Color::WHITE).apply(&mut rt);
+        TextMod::LinkBrush(Paint::solid(Color::WHITE)).apply(&mut rt);
         TextMod::CodeFamily("Fira Code".into()).apply(&mut rt);
-        assert_eq!(rt.default_color, before_color);
+        assert!(matches!(rt.default_color, Paint::Solid(c) if c == Color::BLACK));
         assert_eq!(rt.default_family, before_family);
     }
 
     #[test]
     fn scheme_shape_kind_new() {
-        let s = SchemeShapeKind::new(ShapeKind::Circle);
+        let s = SteelShapeKind::new(ShapeKind::Circle);
         assert!(s.width.is_none());
         assert!(s.height.is_none());
     }
 
     #[test]
     fn scheme_shape_kind_with_size() {
-        let s = SchemeShapeKind::with_size(ShapeKind::Circle, 50.0, 30.0);
+        let s = SteelShapeKind::with_size(ShapeKind::Circle, 50.0, 30.0);
         assert_eq!(s.width, Some(50.0));
         assert_eq!(s.height, Some(30.0));
     }
 
     #[test]
     fn shape_mod_fill() {
-        let m = ShapeMod::Fill(Paint::solid(vello::peniko::Color::BLACK));
+        let m = ShapeMod::Fill(Paint::solid(Color::BLACK));
         assert!(matches!(m, ShapeMod::Fill(_)));
     }
 
@@ -634,7 +658,7 @@ mod tests {
     fn shape_mod_stroke() {
         let m = ShapeMod::Stroke(crate::primitives::paint::Stroke {
             width: 2.0,
-            color: vello::peniko::Color::BLACK,
+            color: Color::BLACK,
         });
         assert!(matches!(m, ShapeMod::Stroke(_)));
     }

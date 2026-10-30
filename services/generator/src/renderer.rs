@@ -163,7 +163,10 @@ impl RenderContext {
                 continue;
             }
 
-            let mapped = buffer_slice.get_mapped_range();
+            let mapped = match buffer_slice.get_mapped_range(){
+                Ok(m) => m,
+                Err(_) => continue,
+            };
 
             let unpadded_bytes_per_row = task.width * 4;
             let mut pixels = Vec::with_capacity((unpadded_bytes_per_row * task.height) as usize);
