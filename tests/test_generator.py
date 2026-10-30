@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from enum import member
 import os
 import signal
 import subprocess
@@ -143,6 +144,8 @@ def build_tests() -> dict[str, FakeQuote]:
         "more_entities": solo(
             color_index=3,
             username="More Entities User",
+            user_status="entities!",
+            user_role="member",
             content="Spoiler text, code here, and underline!",
             entities=[
                 {"type": "spoiler", "offset": 0, "length": 7},

@@ -591,19 +591,6 @@ fn fn_make_node(args: SteelVal) -> Result<SchemeNode, SteelErr> {
     Ok(SchemeNode(Rc::new(RefCell::new(Some(Node { style, content })))))
 }
 
-fn utf16_range_to_bytes(s: &str, offset: usize, length: usize) -> Option<std::ops::Range<usize>> {
-    let end = offset + length;
-    let (mut pos, mut start, mut stop) = (0usize, None, None);
-    for (b, ch) in s.char_indices() {
-        if pos == offset { start = Some(b); }
-        if pos == end { stop = Some(b); break; }
-        pos += ch.len_utf16();
-    }
-    if start.is_none() && pos == offset { start = Some(s.len()); }
-    if stop.is_none() && pos == end { stop = Some(s.len()); }
-    Some(start?..stop?)
-}
-
 struct StyleOpts {
     link_brush: Paint,
     code_family: String,
@@ -639,7 +626,7 @@ fn apply_entities(rich: &mut RichText,
 ) {
     let mut span_vec: Vec<Span> = Vec::with_capacity(entities.as_slice().len());
     for ent in entities.into_iter() {
-        let Some(range) = utf16_range_to_bytes(&rich.text, ent.offset as usize, ent.length as usize)
+        let Some(range) = Some(ent.offset as usize..(ent.offset + ent.length) as usize)
         else { continue };
 
         let mut span = Span::new(range);

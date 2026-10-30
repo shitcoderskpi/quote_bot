@@ -31,12 +31,15 @@ func newSenderCache(b *gotgbot.Bot, chatID int64) *senderCache {
 	return &senderCache{b: b, chatID: chatID, byID: map[int64]*sender{}}
 }
 
-func (c *senderCache) get(u *gotgbot.User) *sender {
+func (c *senderCache) get(u *gotgbot.User, tag string) *sender {
 	if s, ok := c.byID[u.Id]; ok {
 		return s
 	}
 
 	status, title := "member", ""
+	if tag != "" {
+		title = tag
+	}
 	if cm, err := c.b.GetChatMember(c.chatID, u.Id, nil); err != nil {
 		log.Printf("Failed to get chat member %d: %v", u.Id, err)
 	} else {
@@ -83,49 +86,72 @@ func messageText(m *gotgbot.Message) (string, []gotgbot.MessageEntity) {
 	return m.Caption, m.CaptionEntities
 }
 
-func quotedMessages(b *gotgbot.Bot, first *gotgbot.Message, count int) []gotgbot.Message {
-	if count <= 1 || !IsLocalAPI(b) {
+func quotedMessages(b *gotgbot.Bot, first *gotgbot.Message, count int) ([]gotgbot.Message, map[int64]string) {
+	single := []gotgbot.Message{*first}
+	if !IsLocalAPI(b) {
 		if count > 1 {
 			log.Printf("multi-quote requested but IsLocalAPI=false; quoting one message")
 		}
-		return []gotgbot.Message{*first}
+		return single, nil
 	}
 
-	ids := make([]int64, 0, count-1)
-	for i := 1; i < count && first.MessageId-int64(i) > 0; i++ {
+	ids := make([]int64, 0, count)
+	for i := 0; i < count && first.MessageId-int64(i) > 0; i++ {
 		ids = append(ids, first.MessageId-int64(i))
 	}
-	got, err := GetMessages(b, first.Chat.Id, ids)
+	got, tags, err := GetMessagesWithTags(b, first.Chat.Id, ids)
 	if err != nil {
 		log.Printf("getMessages failed, quoting a single message: %v", err)
-		return []gotgbot.Message{*first}
+		return single, nil
 	}
+	hasFirst := false
+	for i := range got {
+		if got[i].MessageId == first.MessageId {
+			hasFirst = true
+			break
+		}
+	}
+	if !hasFirst {
+		got = append(got, *first)
+	}
+
 	sort.Slice(got, func(i, j int) bool { return got[i].MessageId < got[j].MessageId })
-	return append(got, *first)
+	return got, tags
 }
 
-func GetMessages(b *gotgbot.Bot, chatID int64, messageIDs []int64) ([]gotgbot.Message, error) {
-	if len(messageIDs) == 0 {
-		return nil, nil
+func GetMessagesWithTags(b *gotgbot.Bot, chatID int64, ids []int64) ([]gotgbot.Message, map[int64]string, error) {
+	if len(ids) == 0 {
+		return nil, nil, nil
 	}
-	if len(messageIDs) > 50 {
-		return nil, fmt.Errorf("message_ids exceeds maximum limit of 50 (got %d)", len(messageIDs))
+	if len(ids) > 50 {
+		return nil, nil, fmt.Errorf("message_ids exceeds maximum limit of 50 (got %d)", len(ids))
 	}
-
 	raw, err := b.Request("getMessages", map[string]any{
 		"chat_id":     chatID,
-		"message_ids": messageIDs,
+		"message_ids": ids,
 	}, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	var messages []gotgbot.Message
-	if err := json.Unmarshal(raw, &messages); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal getMessages response: %w", err)
+	var msgs []gotgbot.Message
+	if err := json.Unmarshal(raw, &msgs); err != nil {
+		return nil, nil, fmt.Errorf("unmarshal getMessages: %w", err)
 	}
-
-	return messages, nil
+	var extra []struct {
+		MessageId int64  `json:"message_id"`
+		SenderTag string `json:"sender_tag"`
+	}
+	if err := json.Unmarshal(raw, &extra); err != nil {
+		return nil, nil, fmt.Errorf("unmarshal sender_tag: %w", err)
+	}
+	tags := make(map[int64]string, len(extra))
+	for _, e := range extra {
+		if e.SenderTag != "" {
+			tags[e.MessageId] = e.SenderTag
+		}
+	}
+	return msgs, tags, nil
 }
 
 func GetUserInfo(b *gotgbot.Bot, userID int64) (*ForkUser, error) {

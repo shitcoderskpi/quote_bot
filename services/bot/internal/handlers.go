@@ -162,11 +162,20 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 			return nil
 		}
 
+		msgs, tags := quotedMessages(b, reply, count)
+
+		userTag := map[int64]string{}
+		for _, m := range msgs {
+			if m.From != nil && tags[m.MessageId] != "" {
+				userTag[m.From.Id] = tags[m.MessageId]
+			}
+		}
+
 		cache := newSenderCache(b, reply.Chat.Id)
 		var qmsgs []*pb.QuoteMessage
 		var senderOf []*sender
 
-		for _, m := range quotedMessages(b, reply, count) {
+		for _, m := range msgs {
 			if m.From == nil {
 				continue
 			}
@@ -174,7 +183,7 @@ func quoteHandler(queue Queue) func(b *gotgbot.Bot, ctx *ext.Context) error {
 			if text == "" {
 				continue
 			}
-			s := cache.get(m.From)
+			s := cache.get(m.From, userTag[m.From.Id])
 			senderOf = append(senderOf, s)
 			qmsgs = append(qmsgs, &pb.QuoteMessage{
 				MessageId: m.MessageId,
